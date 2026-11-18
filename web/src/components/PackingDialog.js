@@ -1,7 +1,8 @@
+import WaybillFields from './WaybillFields.js';
 import PurchaseFields from './PurchaseFields.js';
 import {ref,reactive,computed,onMounted} from 'vue/dist/vue.esm-bundler.js';
 export default {
- components:{PurchaseFields},
+ components:{WaybillFields,PurchaseFields},
  props:['order','account','api'],emits:['close','submitted'],
  setup(props,{emit}){
   const dialog=ref(),busy=ref(false),error=ref(''),result=ref(null),syncStarted=ref(false);
@@ -33,7 +34,7 @@ export default {
  <fieldset :disabled="locked"><legend>录入方式</legend><div class="packing-modes"><label><input type="radio" value="purchase" v-model="mode">录入采购信息</label><label><input type="radio" value="waybill" v-model="mode">录入国内快递单号</label></div>
  <div v-if="mode==='purchase'"><p class="packing-help">以下 1688 采购信息应用到所选的 {{appliedSelected.length}} 条商品。</p><PurchaseFields :purchase="purchase" :account="account" :api="api"/><label class="packing-auto"><input type="checkbox" v-model="autoSync">自动同步商品采购金额</label>
  <details><summary>补充采购信息（可选）</summary><div class="packing-fields"><label>收件人<input v-model.trim="purchase.recipient"></label><label>联系电话<input v-model.trim="purchase.mobile"></label><label>收件地址<input v-model.trim="purchase.address"></label><label>采购时间<input v-model.trim="purchase.createdAt" placeholder="2026-11-17 16:44:52"></label><label>退款金额（元）<input type="number" min="0" step="0.01" v-model="purchase.refund"></label><label>采购状态<select v-model="purchase.status"><option value="">不填写</option><option value="wait_send">待发货</option></select></label></div></details></div>
- <div v-else class="packing-fields"><label>国内快递单号<input v-model.trim="number" required></label><label>物流公司<input v-model.trim="company" required placeholder="例如：中通快递"></label></div>
+ <div v-else class="packing-fields"><WaybillFields :api="api" :account="account" v-model:number="number" v-model:company="company"/></div>
  </fieldset>
  <p v-if="error" class="error" role="alert">{{error}}</p><section v-if="result" class="packing-result" role="status"><strong>{{result.message}}</strong><p v-if="result.taskId"><a href="#/tasks">查看任务 #{{result.taskId}} ↗</a></p><pre v-if="result.details?.length">{{JSON.stringify(result.details,null,2)}}</pre><small v-if="result.archive">本地记录：{{result.archive}}</small><p v-if="syncStarted">已开始同步待处理订单，完成后点击订单列表“查询”刷新。</p><button v-else-if="result.state==='completed'||result.state==='partial'" type="button" class="secondary" :disabled="busy" @click="sync">同步待处理订单</button></section>
  <footer><span>已选 {{appliedSelected.length}} 条商品</span><button type="button" class="secondary" :disabled="busy" @click="close">{{result?'关闭':'取消'}}</button><button type="submit" :disabled="locked||!selected.length">{{busy?'正在处理…':'提交到妙手'}}</button></footer></form></dialog>`

@@ -55,24 +55,24 @@ func TestSupplierReplayAndManyProducts(t *testing.T) {
 			t.Fatal(e)
 		}
 		tx.Commit()
-		if e = AssignSupplier(db, account, "1688", "", product, sellerID); e != nil {
+		if e = AssignSupplier(db, 1, account, "1688", "", product, sellerID); e != nil {
 			t.Fatal(e)
 		}
 	}
-	if e = AssignSupplier(db, account, "1688", "", "offer1", sellerID); e != nil {
+	if e = AssignSupplier(db, 1, account, "1688", "", "offer1", sellerID); e != nil {
 		t.Fatal(e)
 	}
 	sellers, _ = Suppliers(db, account)
 	if len(sellers) != 1 || len(sellers[0]["products"].([]object)) != 2 {
 		t.Fatal(sellers)
 	}
-	if e = AssignSupplier(db, account, "1688", "", "offer1", 9999); e == nil {
+	if e = AssignSupplier(db, 1, account, "1688", "", "offer1", 9999); e == nil {
 		t.Fatal("unknown seller accepted")
 	}
-	if e = AssignSupplier(db, other, "1688", "", "offer1", sellerID); e == nil {
+	if e = AssignSupplier(db, 1, other, "1688", "", "offer1", sellerID); e == nil {
 		t.Fatal("cross-account accepted")
 	}
-	if e = AssignSupplier(db, account, "1688", "", "unknown", sellerID); e == nil {
+	if e = AssignSupplier(db, 1, account, "1688", "", "unknown", sellerID); e == nil {
 		t.Fatal("unknown source accepted")
 	}
 	report := object{"groups": []object{{"key": `source:["1688","","offer1"]`}, {"key": `source:["1688","","offer2"]`}}}
@@ -94,7 +94,7 @@ func TestSupplierReplayAndManyProducts(t *testing.T) {
 			t.Fatal("older evidence overwrote latest")
 		}
 	}
-	if e = AssignSupplier(db, account, "1688", "", "offer1", 0); e != nil {
+	if e = AssignSupplier(db, 1, account, "1688", "", "offer1", 0); e != nil {
 		t.Fatal(e)
 	}
 	sellers, _ = Suppliers(db, account)

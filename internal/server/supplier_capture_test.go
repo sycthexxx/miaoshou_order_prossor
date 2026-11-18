@@ -28,7 +28,7 @@ func TestSupplierCaptureLANRoute(t *testing.T) {
 	if _, e = db.Exec(`INSERT INTO shop_products(account_id,platform,shop_id,platform_item_id,payload,captured_at,source_file) VALUES(?,'tiktok','shop','product',?,'2026','fixture')`, account, payload); e != nil {
 		t.Fatal(e)
 	}
-	h := New(db, dir, 1, "unused")
+	h := authenticatedTestServer(t, db, dir)
 	request := func(id, origin, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "http://192.168.1.104:17381/api/accounts/"+id+"/source-supplier/capture", strings.NewReader(body))
 		r.Header.Set("Origin", origin)

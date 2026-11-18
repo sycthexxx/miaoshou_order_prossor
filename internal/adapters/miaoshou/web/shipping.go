@@ -20,6 +20,37 @@ func (s PackingSubmitter) InspectLabel(ctx context.Context, account, packageID s
 	return inspectLabel(raw, packageID), nil
 }
 
+func labelFailureReason(raw browserResponse, fallback string) string {
+	if raw.Error != "" {
+		return raw.Error
+	}
+	var reply struct {
+		Reason  string `json:"reason"`
+		Message string `json:"message"`
+		Msg     string `json:"msg"`
+		Errors  []struct {
+			ErrMsg string `json:"errMsg"`
+			Reason string `json:"reason"`
+		} `json:"errors"`
+	}
+	if json.Unmarshal([]byte(raw.Body), &reply) == nil {
+		for _, detail := range reply.Errors {
+			if detail.ErrMsg != "" {
+				return detail.ErrMsg
+			}
+			if detail.Reason != "" {
+				return detail.Reason
+			}
+		}
+		for _, message := range []string{reply.Reason, reply.Message, reply.Msg} {
+			if message != "" {
+				return message
+			}
+		}
+	}
+	return fallback
+}
+
 func inspectLabel(raw browserResponse, packageID string) packing.ShippingLabel {
 	r := packing.ShippingLabel{State: "not_sent", Message: "无法读取最新运单状态，请检查妙手登录状态后重试。", Archive: raw.Archive}
 	if raw.Error != "" {
@@ -36,6 +67,7 @@ func inspectLabel(raw browserResponse, packageID string) packing.ShippingLabel {
 		} `json:"orderPackageDetailInfo"`
 	}
 	if json.Unmarshal([]byte(raw.Body), &data) != nil || raw.Status != 200 || data.Result != "success" || data.Package.ID != packageID {
+		r.Message = labelFailureReason(raw, r.Message)
 		return r
 	}
 	if n := strings.TrimSpace(data.Package.Number); n != "" {
@@ -64,7 +96,7 @@ func (s PackingSubmitter) ApplyLabel(ctx context.Context, account, packageID str
 		Errors []any  `json:"errors"`
 	}
 	if check.Error != "" || check.Status != 200 || json.Unmarshal([]byte(check.Body), &checked) != nil || checked.Result != "success" || len(checked.Errors) > 0 {
-		return packing.ShippingLabel{State: "not_sent", Message: "运单申请前检查未通过，请在妙手处理后重试。", Archive: check.Archive}, nil
+		return packing.ShippingLabel{State: "not_sent", Message: labelFailureReason(check, "运单申请前检查未通过，请在妙手处理后重试。"), Archive: check.Archive}, nil
 	}
 	raw, err := s.labelRequest(ctx, account, packageID, "apply")
 	if err != nil {
@@ -82,10 +114,25 @@ func (s PackingSubmitter) ApplyLabel(ctx context.Context, account, packageID str
 	if r.State == "completed" || r.State == "partial" {
 		label.State = "unknown"
 	}
-	label.Message = "申请运单未确认成功，请在妙手核对后重试。"
+	label.Message = r.Message
 	if details, ok := r.Details.([]any); ok && len(details) > 0 {
-		b, _ := json.Marshal(r.Details)
-		label.Message = fmt.Sprintf("申请运单失败：%s", b)
+		var reasons []string
+		for _, detail := range details {
+			if obj, ok := detail.(map[string]any); ok {
+				for _, key := range []string{"errMsg", "reason", "message"} {
+					if text, ok := obj[key].(string); ok && text != "" {
+						reasons = append(reasons, text)
+						break
+					}
+				}
+			}
+		}
+		if len(reasons) > 0 {
+			label.Message = "申请运单失败：" + strings.Join(reasons, "；")
+		} else {
+			b, _ := json.Marshal(details)
+			label.Message = fmt.Sprintf("申请运单失败：%s", b)
+		}
 	}
 	return label, nil
 }

@@ -23,7 +23,7 @@ func ImportBatch(ctx context.Context, db *sql.DB, account string, batch orders.B
 	}
 	defer tx.Rollback()
 	var exists int
-	if err = tx.QueryRowContext(ctx, "SELECT 1 FROM accounts WHERE id=?", account).Scan(&exists); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT 1 FROM accounts WHERE id=? AND deleted=0", account).Scan(&exists); err != nil {
 		return result, err
 	}
 	if batch.Policy.RequireUnchangedAccount {

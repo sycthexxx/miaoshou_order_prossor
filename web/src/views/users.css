@@ -1,0 +1,11 @@
+.user-management > header {display:flex;align-items:center;justify-content:space-between;gap:12px}
+.users-table-wrap {overflow-x:auto}
+.users-table-wrap table {width:100%}
+.user-management dialog {width:min(420px,92vw);max-height:85vh;overflow:auto;color:var(--ink);border:1px solid #d6e2e5;border-radius:12px;padding:20px}
+.user-management dialog::backdrop {background:#19334170}
+.user-management dialog form {display:grid;gap:14px;margin:0}
+.user-management dialog form > label:not(.check) {display:grid;gap:5px}
+.user-management dialog .check {display:flex;align-items:center;gap:8px}
+.user-management dialog .check input {width:auto;min-width:0;margin:0}
+.user-management dialog fieldset {min-width:0;border:1px solid #d6e2e5;border-radius:8px;padding:10px;display:grid;gap:8px}
+.user-management dialog footer {justify-content:flex-end}

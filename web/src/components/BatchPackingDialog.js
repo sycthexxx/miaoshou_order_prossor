@@ -1,10 +1,11 @@
+import WaybillFields from './WaybillFields.js';
 import {formatOrderTime} from '../lib/procurement-orders.js';
 import PurchaseFields from './PurchaseFields.js';
 import {ref,reactive,computed,onMounted} from 'vue/dist/vue.esm-bundler.js';
 import ProductImage from './ProductImage.js';
 import {sourceLines,filteredLines,selectionStats,groupLinesBySpec,filterOptions} from '../lib/packing-selection.js';
 export default {
- components:{ProductImage,PurchaseFields},props:['group','account','api','gifts'],emits:['close','created'],
+ components:{WaybillFields,ProductImage,PurchaseFields},props:['group','account','api','gifts','leaseId'],emits:['close','created'],
  setup(props,{emit}){
   const dialog=ref(),busy=ref(false),uncertain=ref(false),error=ref('');
   const lines=sourceLines(props.group),selected=ref(new Set()),filters=reactive({sources:[],colors:[],sizes:[],query:''});
@@ -24,7 +25,7 @@ export default {
    if(busy.value||uncertain.value||!stats.value.lines)return;busy.value=true;error.value='';
    const selections=lines.filter(l=>selected.value.has(l.key)).map(l=>({packageId:String(l.packageId),itemId:String(l.itemId)}));
    const info={amount:amount.value,autoSyncAmount:mode.value==='purchase'&&autoSync.value,...(mode.value==='purchase'?{purchase:{...purchase}}:{waybills:[{company:company.value,number:number.value}]})};
-   try{const result=await props.api(`/accounts/${props.account}/packing-jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.value,sourceKey:props.group.key,gifts:props.gifts,intervalSeconds:Number(interval.value),selections,info})});emit('created',result.id);emit('close')}
+   try{const result=await props.api(`/accounts/${props.account}/packing-jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-Supplier-Lease':String(props.leaseId)},body:JSON.stringify({name:name.value,sourceKey:props.group.key,gifts:props.gifts,intervalSeconds:Number(interval.value),selections,info})});emit('created',result.id);emit('close')}
    catch(e){error.value=e.message;if(!e.status||e.status>=500){uncertain.value=true;error.value+='。请关闭表单并查看任务列表，确认是否已保存，避免重复创建。';emit('created',null)}}finally{busy.value=false}
   }
   return{formatOrderTime,dialog,busy,error,uncertain,lines,selected,filters,colors,sizes,visible,variants,appliedVariants,stats,toggle,allSelected,mode,company,number,amount,autoSync,interval,name,purchase,close,save};
@@ -32,7 +33,7 @@ export default {
  <header><div><h2 id="batch-packing-title">{{group.sources?'厂家批量提交代打包':'货源批量提交代打包'}}</h2><p v-if="group.sources">{{group.supplier.name}} · {{group.sources.length}} 个货源 · 不使用货代</p><p v-else>{{group.source.source}} · {{group.source.sourceItemId}} · 不使用货代</p></div><button type="button" class="secondary" :disabled="busy" @click="close">关闭</button></header>
  <fieldset :disabled="busy||uncertain" class="batch-info"><legend>填写打包信息</legend><div v-if="!group.sources" class="batch-product"><ProductImage :item="group.image"/><div><strong>{{group.title}}</strong><p>{{group.supplier?.name||'未指定厂家'}}</p></div></div>
  <div class="packing-modes"><label><input type="radio" value="waybill" v-model="mode">录入快递单号</label><label><input type="radio" value="purchase" v-model="mode">录入采购信息（自动同步快递单号）</label></div>
- <div v-if="mode==='waybill'" class="packing-fields"><label>国内快递单号<input v-model.trim="number" required placeholder="请输入国内快递单号"></label><label>物流公司<input v-model.trim="company" required placeholder="请选择或输入物流公司" list="batch-logistics"></label><datalist id="batch-logistics"><option>中通快递</option><option>圆通速递</option><option>申通快递</option><option>韵达快递</option><option>顺丰速运</option><option>极兔速递</option><option>邮政快递包裹</option><option>京东物流</option></datalist></div>
+ <div v-if="mode==='waybill'" class="packing-fields"><WaybillFields :api="api" :account="account" v-model:number="number" v-model:company="company"/></div>
  <div v-else><PurchaseFields :purchase="purchase" :account="account" :api="api"/><label class="packing-auto"><input v-model="autoSync" type="checkbox">自动同步商品采购金额</label></div>
  <label v-if="mode==='waybill'||!autoSync" class="batch-amount">每条订单商品采购金额（元，可选）<input v-model="amount" type="number" min="0" step="0.01" placeholder="产品实付"></label><p class="packing-help">以上信息应用到勾选的{{group.sources?'不同货品的':''}}订单商品。采购金额按商品行填写，不会把本次采购总额分摊到订单。同包裹赠品会自动使用这份信息一起提交，其他普通商品不会自动加入。</p></fieldset>
  <fieldset :disabled="busy||uncertain"><legend>一份打包信息，应用到{{group.sources?'多个货品、':''}}规格和订单</legend><p class="packing-help">可同时勾选不同颜色、尺码的多个规格。下方全部已选订单共用上面这一份打包信息，保存为一个任务。</p>

@@ -56,7 +56,7 @@ func TestCaptureSupplierReuseAndIdempotence(t *testing.T) {
 	db, account, _ := captureFixture(t)
 	captureProduct(t, db, account, "100", "")
 	captureProduct(t, db, account, "200", "")
-	result, e := CaptureSupplier(db, account, "100", "  正格服饰厂  ")
+	result, e := CaptureSupplier(db, 1, account, "100", "  正格服饰厂  ")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -71,14 +71,14 @@ func TestCaptureSupplierReuseAndIdempotence(t *testing.T) {
 	if e = db.QueryRow("SELECT updated_at FROM source_suppliers WHERE product_id='100'").Scan(&before); e != nil {
 		t.Fatal(e)
 	}
-	result, e = CaptureSupplier(db, account, "200", "正格服饰厂")
+	result, e = CaptureSupplier(db, 1, account, "200", "正格服饰厂")
 	if e != nil {
 		t.Fatal(e)
 	}
 	if result["created"] != false || result["supplierId"] != id || result["assigned"] != int64(1) {
 		t.Fatal(result)
 	}
-	result, e = CaptureSupplier(db, account, "100", " 正格服饰厂 ")
+	result, e = CaptureSupplier(db, 1, account, "100", " 正格服饰厂 ")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -96,7 +96,7 @@ func TestCaptureSupplierReuseAndIdempotence(t *testing.T) {
 	if captureCount(t, db, "suppliers") != 1 || captureCount(t, db, "source_suppliers") != 2 {
 		t.Fatal("unexpected supplier or assignment count")
 	}
-	result, e = CaptureSupplier(db, account, "100", "另一家新工厂")
+	result, e = CaptureSupplier(db, 1, account, "100", "另一家新工厂")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -130,14 +130,14 @@ func TestCaptureSupplierMixedSitesUpdatesDifferentNames(t *testing.T) {
 		product, site string
 		id            int64
 	}{{"100", "", manual}, {"100", "keep", existing}, {"200", "", manual}} {
-		if e = AssignSupplier(db, account, "1688", assignment.site, assignment.product, assignment.id); e != nil {
+		if e = AssignSupplier(db, 1, account, "1688", assignment.site, assignment.product, assignment.id); e != nil {
 			t.Fatal(e)
 		}
 	}
 	if _, e = db.Exec("UPDATE source_suppliers SET updated_at='before-capture'"); e != nil {
 		t.Fatal(e)
 	}
-	r, e := CaptureSupplier(db, account, "100", "页面厂家")
+	r, e := CaptureSupplier(db, 1, account, "100", "页面厂家")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -168,7 +168,7 @@ func TestCaptureSupplierMixedSitesUpdatesDifferentNames(t *testing.T) {
 	if captureCount(t, db, "source_suppliers") != 4 || captureCount(t, db, "suppliers") != 2 {
 		t.Fatal("duplicate site or supplier")
 	}
-	r, e = CaptureSupplier(db, account, "100", "  页面厂家  ")
+	r, e = CaptureSupplier(db, 1, account, "100", "  页面厂家  ")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -184,13 +184,13 @@ func TestCaptureSupplierLegacyWhitespaceNameReuse(t *testing.T) {
 		t.Fatal(e)
 	}
 	id, _ := res.LastInsertId()
-	if e = AssignSupplier(db, account, "1688", "", "100", id); e != nil {
+	if e = AssignSupplier(db, 1, account, "1688", "", "100", id); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = db.Exec("UPDATE source_suppliers SET updated_at='before'"); e != nil {
 		t.Fatal(e)
 	}
-	r, e := CaptureSupplier(db, account, "100", "同名厂")
+	r, e := CaptureSupplier(db, 1, account, "100", "同名厂")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -212,18 +212,18 @@ func TestCaptureSupplierAccountIsolationAndValidation(t *testing.T) {
 		{other, "100", "厂家"}, {account, "200", "厂家"}, {account, "999", "厂家"},
 		{account, "https://detail.1688.com/offer/100.html", "厂家"}, {account, "100", "   "},
 	} {
-		if _, e := CaptureSupplier(db, tc.account, tc.product, tc.name); e == nil {
+		if _, e := CaptureSupplier(db, 1, tc.account, tc.product, tc.name); e == nil {
 			t.Fatalf("unexpected acceptance %+v", tc)
 		}
 	}
 	if captureCount(t, db, "suppliers") != 0 {
 		t.Fatal("invalid capture created supplier")
 	}
-	a, e := CaptureSupplier(db, account, "100", "同名厂家")
+	a, e := CaptureSupplier(db, 1, account, "100", "同名厂家")
 	if e != nil {
 		t.Fatal(e)
 	}
-	b, e := CaptureSupplier(db, other, "200", "同名厂家")
+	b, e := CaptureSupplier(db, 1, other, "200", "同名厂家")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -240,7 +240,7 @@ func TestCaptureSupplierConcurrentReportsAndRollback(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, e := CaptureSupplier(db, account, "100", "并发厂家")
+			_, e := CaptureSupplier(db, 1, account, "100", "并发厂家")
 			if e != nil {
 				errors <- e
 			}
@@ -259,7 +259,7 @@ func TestCaptureSupplierConcurrentReportsAndRollback(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = CaptureSupplier(db, account, "200", "应当回滚的厂家"); e == nil {
+	if _, e = CaptureSupplier(db, 1, account, "200", "应当回滚的厂家"); e == nil {
 		t.Fatal("expected assignment failure")
 	}
 	if n := captureCount(t, db, "suppliers"); n != 1 {
@@ -270,7 +270,7 @@ func TestCaptureSupplierConcurrentReportsAndRollback(t *testing.T) {
 func TestCaptureSupplierUpdateFailureRollsBackAllSitesAndNewSupplier(t *testing.T) {
 	db, account, _ := captureFixture(t)
 	captureProduct(t, db, account, "100", "")
-	original, e := CaptureSupplier(db, account, "100", "旧厂家")
+	original, e := CaptureSupplier(db, 1, account, "100", "旧厂家")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -281,7 +281,7 @@ func TestCaptureSupplierUpdateFailureRollsBackAllSitesAndNewSupplier(t *testing.
 	if _, e = db.Exec(`CREATE TRIGGER fail_capture_update BEFORE UPDATE ON source_suppliers WHEN NEW.product_id='100' BEGIN SELECT RAISE(ABORT,'fixture update failure'); END;`); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = CaptureSupplier(db, account, "100", "应当回滚的新厂家"); e == nil {
+	if _, e = CaptureSupplier(db, 1, account, "100", "应当回滚的新厂家"); e == nil {
 		t.Fatal("expected reassignment failure")
 	}
 	if captureCount(t, db, "suppliers") != 1 || captureCount(t, db, "source_suppliers") != 1 {

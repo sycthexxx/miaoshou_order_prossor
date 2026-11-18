@@ -24,7 +24,7 @@ func TestSupplierPackingAcrossProductsCombinesPackageAndGift(t *testing.T) {
 	result, _ := db.Exec(`INSERT INTO suppliers(account_id,platform,name) VALUES(?,'1688','factory')`, account)
 	supplier, _ := result.LastInsertId()
 	for _, id := range []string{"1", "2"} {
-		if err = AssignSupplier(db, account, "1688", "", id, supplier); err != nil {
+		if err = AssignSupplier(db, 1, account, "1688", "", id, supplier); err != nil {
 			t.Fatal(err)
 		}
 	}

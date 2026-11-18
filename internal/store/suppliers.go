@@ -114,10 +114,13 @@ func Suppliers(db *sql.DB, account string) ([]object, error) {
 	return result, nil
 }
 
-func AssignSupplier(db *sql.DB, account, source, site, product string, supplier int64) error {
+func AssignSupplier(db *sql.DB, userID int64, account, source, site, product string, supplier int64) error {
 	if source == "" || product == "" || len(source) > 100 || len(site) > 100 || len(product) > 200 || supplier < 0 {
 		return fmt.Errorf("货源参数不正确")
 	}
+	purchases := purchasesFor(db)
+	purchases.RLock()
+	defer purchases.RUnlock()
 	tx, e := db.Begin()
 	if e != nil {
 		return e
@@ -128,6 +131,9 @@ func AssignSupplier(db *sql.DB, account, source, site, product string, supplier 
 	e = tx.QueryRow(`SELECT 1 FROM shop_products p,json_each(p.payload,'$.sourceList') s WHERE p.account_id=? AND json_extract(s.value,'$.source')=? AND COALESCE(json_extract(s.value,'$.sourceSite'),'')=? AND CAST(json_extract(s.value,'$.sourceItemId') AS TEXT)=? LIMIT 1`, account, source, site, product).Scan(&valid)
 	if e != nil {
 		return fmt.Errorf("货源不属于当前账户已同步的产品")
+	}
+	if e = purchases.checkSourceAvailable(tx, account, userID, source, product, &site, supplier); e != nil {
+		return e
 	}
 	if supplier == 0 {
 		_, e = tx.Exec(`DELETE FROM source_suppliers WHERE account_id=? AND source=? AND site=? AND product_id=?`, account, source, site, product)

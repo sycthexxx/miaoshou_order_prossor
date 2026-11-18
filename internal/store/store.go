@@ -25,6 +25,18 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, e
 	}
+	if e = migrateUsers(db); e != nil {
+		db.Close()
+		return nil, e
+	}
+	if _, e = db.Exec(`CREATE TABLE IF NOT EXISTS plugin_query_settings (
+        id INTEGER PRIMARY KEY CHECK(id=1),
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        include_gifts INTEGER NOT NULL DEFAULT 0
+    )`); e != nil {
+		db.Close()
+		return nil, e
+	}
 	if e = migrateOrders(db); e != nil {
 		db.Close()
 		return nil, e
@@ -62,10 +74,11 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, e
 	}
+	registerPurchaseMap(db)
 	return db, nil
 }
 func Accounts(db *sql.DB) ([]Account, error) {
-	r, e := db.Query("SELECT id,name,created_at,storage_key FROM accounts ORDER BY id")
+	r, e := db.Query("SELECT id,name,created_at,storage_key FROM accounts WHERE deleted=0 ORDER BY id")
 	if e != nil {
 		return nil, e
 	}
@@ -102,7 +115,7 @@ func Create(db *sql.DB, name string) (string, error) {
 }
 func StorageKey(db *sql.DB, id string) string {
 	var key string
-	db.QueryRow("SELECT storage_key FROM accounts WHERE id=?", id).Scan(&key)
+	db.QueryRow("SELECT storage_key FROM accounts WHERE deleted=0 AND id=?", id).Scan(&key)
 	return key
 }
 func migrateAccounts(db *sql.DB) error {
@@ -144,5 +157,5 @@ func migrateAccounts(db *sql.DB) error {
 }
 func Exists(db *sql.DB, id string) bool {
 	var n int
-	return db.QueryRow("SELECT 1 FROM accounts WHERE id=?", id).Scan(&n) == nil
+	return db.QueryRow("SELECT 1 FROM accounts WHERE deleted=0 AND id=?", id).Scan(&n) == nil
 }

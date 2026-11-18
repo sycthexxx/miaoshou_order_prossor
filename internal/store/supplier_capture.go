@@ -12,11 +12,14 @@ var offerNumber = regexp.MustCompile(`^[0-9]{1,40}$`)
 
 // CaptureSupplier preserves an association only when its supplier name matches.
 // Different names reassign this product without renaming or deleting old suppliers.
-func CaptureSupplier(db *sql.DB, account, product, name string) (object, error) {
+func CaptureSupplier(db *sql.DB, userID int64, account, product, name string) (object, error) {
 	name = strings.TrimSpace(name)
 	if !offerNumber.MatchString(product) || name == "" || len([]rune(name)) > 120 {
 		return nil, fmt.Errorf("商品ID或厂家名称不正确")
 	}
+	purchases := purchasesFor(db)
+	purchases.RLock()
+	defer purchases.RUnlock()
 	tx, e := db.Begin()
 	if e != nil {
 		return nil, e
@@ -108,6 +111,9 @@ func CaptureSupplier(db *sql.DB, account, product, name string) (object, error) 
 		if e = tx.QueryRow(`SELECT id FROM suppliers WHERE account_id=? AND platform='1688' AND name=?`, account, name).Scan(&supplier); e != nil {
 			return nil, e
 		}
+	}
+	if e = purchases.checkSourceAvailable(tx, account, userID, "1688", product, nil, supplier); e != nil {
+		return nil, e
 	}
 	assigned, updated := int64(0), int64(0)
 	at := time.Now().UTC().Format(time.RFC3339Nano)

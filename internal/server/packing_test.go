@@ -76,8 +76,11 @@ func TestPackingChecksOrderItemMembershipAndLeavesGroupsToSync(t *testing.T) {
 		t.Fatal("single submission missing from task list", jobs, err)
 	}
 	detail, err := (store.PackingJobs{DB: db}).Detail(context.Background(), id, jobs[0].ID)
-	if err != nil || len(detail.Items) != 1 || len(detail.Items[0].Lines) != 2 || !detail.Items[0].Lines[1].Gift || detail.Items[0].Result.Archive != "runtime/1/packing/test" || detail.Items[0].Result.TaskID != jobs[0].ID {
+	if err != nil || len(detail.Items) != 1 || len(detail.Items[0].Lines) != 2 || !detail.Items[0].Lines[1].Gift || detail.Items[0].State != "completed" {
 		t.Fatal("submission details missing", detail, err)
+	}
+	if detail.Items[0].Result != nil {
+		t.Fatal("completed task detail retained the successful response", detail.Items[0].Result)
 	}
 	var stored string
 	db.QueryRow("SELECT payload FROM packages WHERE account_id=?", id).Scan(&stored)

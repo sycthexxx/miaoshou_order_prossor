@@ -15,7 +15,7 @@ func TestAccountsPersistenceAndOrigin(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	h := New(db, dir, 1, "test")
+	h := authenticatedTestServer(t, db, dir)
 	request := func(origin, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "http://127.0.0.1:17381/api/accounts", strings.NewReader(body))
 		r.Header.Set("Origin", origin)
@@ -44,5 +44,45 @@ func TestAccountsPersistenceAndOrigin(t *testing.T) {
 	}
 	if store.Exists(db, "../../other") {
 		t.Fatal("unexpected account")
+	}
+}
+
+func TestPluginQuerySettingsSurviveRestart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.db")
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"A", "B"} {
+		if _, err := store.Create(db, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := authenticatedTestServer(t, db, dir)
+	request := func(method, body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(method, "http://127.0.0.1/api/plugin-query-settings", strings.NewReader(body)))
+		return w
+	}
+	if w := request("GET", ""); !strings.Contains(w.Body.String(), `"account":"1"`) {
+		t.Fatal(w.Body.String())
+	}
+	const settings = `{"account":"2","gifts":true}`
+	if w := request("PUT", settings); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if w := request("PUT", `{"account":"999"}`); w.Code != 400 {
+		t.Fatal(w.Code)
+	}
+	db.Close()
+	db, err = store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	h = authenticatedTestServer(t, db, dir)
+	if w := request("GET", ""); strings.TrimSpace(w.Body.String()) != settings {
+		t.Fatal(w.Body.String())
 	}
 }

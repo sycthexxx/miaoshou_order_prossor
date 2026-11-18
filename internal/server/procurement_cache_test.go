@@ -103,7 +103,7 @@ func TestProcurementRoutesCacheUntilExplicitRefresh(t *testing.T) {
 		}
 	}
 	set(2)
-	h := New(db, dir, 1, "unused")
+	h := authenticatedTestServer(t, db, dir)
 	get := func(path string) map[string]any {
 		t.Helper()
 		r := httptest.NewRequest("GET", "http://localhost"+path, nil)

@@ -80,20 +80,35 @@ func TestPackingJobHTTPSourceSelectionAndSinglePackageWrites(t *testing.T) {
 	g := &browserGateway{db: db, runtime: fixedRuntime{browser.Target{API: u, Token: "fixture"}}}
 	mux := http.NewServeMux()
 	packingJobRoutes(nil, mux, g)
+	registerSupplierLocks(mux, db)
+	actor := loginUser{ID: 1, Username: "管理员"}
+	req := httptest.NewRequest("POST", "/api/accounts/"+account+"/supplier-locks/0", nil)
+	grant := httptest.NewRecorder()
+	mux.ServeHTTP(grant, req.WithContext(context.WithValue(req.Context(), userContextKey{}, actor)))
+	var lease store.SupplierLease
+	if grant.Code != 200 || json.Unmarshal(grant.Body.Bytes(), &lease) != nil || lease.ID == 0 {
+		t.Fatal(grant.Code, grant.Body.String())
+	}
 	body := `{"name":"batch","sourceKey":"source:[\"1688\",\"\",\"100\"]","intervalSeconds":5,"selections":[{"packageId":"1","itemId":"11"},{"packageId":"2","itemId":"21"}],"info":{"purchase":{"platform":"1688","orderNumber":"001","buyer":"buyer","seller":"seller"},"autoSyncAmount":true}}`
-	create := func() *httptest.ResponseRecorder {
+	create := func(user loginUser) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/accounts/"+account+"/packing-jobs", strings.NewReader(body)))
+		req := httptest.NewRequest("POST", "/api/accounts/"+account+"/packing-jobs", strings.NewReader(body))
+		req.Header.Set("X-Supplier-Lease", fmt.Sprint(lease.ID))
+		req = req.WithContext(context.WithValue(req.Context(), userContextKey{}, user))
+		mux.ServeHTTP(w, req)
 		return w
 	}
-	w := create()
+	if refused := create(loginUser{ID: 2, Username: "另一用户"}); refused.Code != 409 {
+		t.Fatal("another user submitted with a copied lease", refused.Code)
+	}
+	w := create(actor)
 	if w.Code != 201 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	if len(calls) != 0 {
 		t.Fatal("creation sent synchronous writes")
 	}
-	if w = create(); w.Code != 409 {
+	if w = create(actor); w.Code != 409 {
 		t.Fatal("duplicate queued selections accepted", w.Code)
 	}
 	repo := store.PackingJobs{DB: db}

@@ -14,8 +14,8 @@ document.querySelector('#form').addEventListener('submit',async e=>{
   // Store first: immediately injected bridges must pass the exact-origin check.
   await chrome.storage.local.set({workbenchOrigin:origin});
   await registerWorkbench(chrome,origin);
-  const tabs=await chrome.tabs.query({url:[pattern]});let connected=0;
-  for(const tab of tabs){if(new URL(tab.url).origin!==origin)continue;try{await chrome.scripting.executeScript({target:{tabId:tab.id},files:['bridge.js']});await chrome.tabs.sendMessage(tab.id,{type:'REFRESH_WORKBENCH_BRIDGE'},{frameId:0});connected++}catch{}}
-  result.textContent=connected?`已连接 ${connected} 个工作台页面。回到采购汇总点击“打开货源”。`:'已授权。请打开此工作台，刷新采购汇总后再点击“打开货源”。';
+  const tabs=await chrome.tabs.query({url:[pattern]});
+  for(const tab of tabs){if(new URL(tab.url).origin!==origin)continue;try{await chrome.scripting.executeScript({target:{tabId:tab.id},files:['bridge.js']});await chrome.tabs.sendMessage(tab.id,{type:'REFRESH_WORKBENCH_BRIDGE'},{frameId:0})}catch{}}
+  result.textContent='地址已保存。直接打开 1688 货源将使用后台账户管理中设置的默认查询账户。';
  }catch(e){result.textContent=e.message}
 });

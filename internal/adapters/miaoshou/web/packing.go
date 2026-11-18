@@ -107,6 +107,7 @@ func packingResult(status int, body, archive string) packing.Result {
 		Result       string `json:"result"`
 		Message      string `json:"message"`
 		Msg          string `json:"msg"`
+		Reason       string `json:"reason"`
 		Errors       []any  `json:"errors"`
 		SuccessCount *int   `json:"successCount"`
 		FailCount    *int   `json:"failCount"`
@@ -136,6 +137,9 @@ func packingResult(status int, body, archive string) packing.Result {
 		r.Message = data.Message
 		if r.Message == "" {
 			r.Message = data.Msg
+		}
+		if r.Message == "" {
+			r.Message = data.Reason
 		}
 		if r.Message == "" {
 			r.Message = "妙手未完成提交，请查看错误详情。"

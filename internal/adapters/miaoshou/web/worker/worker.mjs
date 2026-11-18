@@ -10,6 +10,7 @@ import {archiveResponse,endpoints} from './archive.mjs';
 import {writeScopeSnapshot} from './scope-snapshot.mjs';
 import {submitPacking} from './packing.mjs';
 import {requestWaybill} from './waybill.mjs';
+import {lookupLogisticsCompany} from './logistics-company.mjs';
 import {lookupPurchase} from './purchase-lookup.mjs';
 import {getAmountDetail} from './amount-detail.mjs';
 const root=process.env.ORDER_DATA_DIR,token=process.env.BROWSER_TOKEN_FILE?(await readFile(process.env.BROWSER_TOKEN_FILE,'utf8')).trim():process.env.BROWSER_TOKEN;
@@ -56,11 +57,17 @@ const server=http.createServer(async(req,res)=>{
  res.setHeader('Content-Type','application/json');
  const reply=(status,data)=>{res.writeHead(status);res.end(JSON.stringify(data))};
  if(req.headers.authorization!=='Bearer '+token)return reply(403,{error:'禁止访问'});
- const match=req.url.match(/^\/accounts\/([a-f0-9]{32}|[1-9][0-9]*)\/(login|close|status|sync|sync-pending|sync-products|stop-sync|packing|waybill|purchase-lookup|amount-detail)$/);if(!match)return reply(404,{error:'接口不存在'});
+ const match=req.url.match(/^\/accounts\/([a-f0-9]{32}|[1-9][0-9]*)\/(login|close|status|sync|sync-pending|sync-products|stop-sync|packing|waybill|purchase-lookup|logistics-company|amount-detail)$/);if(!match)return reply(404,{error:'接口不存在'});
  const [,id,action]=match;
  if(accountKey&&id!==accountKey)return reply(404,{error:'账户不属于当前容器'});
  try{if(action==='status'&&req.method==='GET'){let s=sessions.get(id);if(!s){s={state:'closed',sync:await readJob(root,id)};sessions.set(id,s)}return reply(200,view(s))}
  if(sessions.get(id)?.packing&&action!=='status')return reply(409,{error:'正在提交代打包，请等待结果'});
+ if(action==='logistics-company'&&req.method==='POST'){
+  const session=sessions.get(id);
+  if(!session?.context)return reply(409,{error:'请先在账户管理打开并登录妙手浏览器'});
+  let body='';for await(const chunk of req)body+=chunk;
+  return reply(200,await lookupLogisticsCompany({session,payload:JSON.parse(body)}));
+ }
  if((action==='packing'||action==='waybill'||action==='purchase-lookup'||action==='amount-detail')&&req.method==='POST'){
   const s=sessions.get(id);
   if(!s?.context||s.state!=='verified')return reply(409,{error:'请先在账户管理打开浏览器并完成订单读取验证'});

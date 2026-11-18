@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"order_processor/internal/store"
 )
@@ -22,9 +23,13 @@ func supplierRoutes(mux *http.ServeMux, db *sql.DB) {
 			send(w, 400, map[string]string{"error": "请求格式错误"})
 			return
 		}
-		result, e := store.CaptureSupplier(db, id, in.ProductID, in.Name)
+		result, e := store.CaptureSupplier(db, currentUser(r).ID, id, in.ProductID, in.Name)
 		if e != nil {
-			send(w, 400, map[string]string{"error": e.Error()})
+			status := http.StatusBadRequest
+			if errors.Is(e, store.ErrSupplierBusy) {
+				status = http.StatusConflict
+			}
+			send(w, status, map[string]string{"error": e.Error()})
 			return
 		}
 		send(w, 200, result)
@@ -58,8 +63,12 @@ func supplierRoutes(mux *http.ServeMux, db *sql.DB) {
 			send(w, 400, map[string]string{"error": "请求格式错误"})
 			return
 		}
-		if e := store.AssignSupplier(db, id, in.Source, in.Site, in.Product, in.Supplier); e != nil {
-			send(w, 400, map[string]string{"error": e.Error()})
+		if e := store.AssignSupplier(db, currentUser(r).ID, id, in.Source, in.Site, in.Product, in.Supplier); e != nil {
+			status := http.StatusBadRequest
+			if errors.Is(e, store.ErrSupplierBusy) {
+				status = http.StatusConflict
+			}
+			send(w, status, map[string]string{"error": e.Error()})
 			return
 		}
 		send(w, 200, map[string]bool{"ok": true})

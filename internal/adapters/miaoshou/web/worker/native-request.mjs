@@ -55,10 +55,16 @@ export async function submitRequest({root,id,session,payload,endpoint,operation,
   },{client,payload,endpoint})}catch{/* HTTP/business failures still have a raw response. */}
   if(response){
    const body=(await response.body()).toString('utf8');
-   await save(dir,'response.txt',body);
-   // Keep JSON byte-for-byte, even when ERP reports a business failure.
-   try{JSON.parse(body);await save(dir,'response.json',body)}catch(e){if(!(e instanceof SyntaxError))throw e}
+   let data;
+   try{data=JSON.parse(body)}catch{/* Preserve malformed responses for diagnosis. */}
+   const ok=response.status()>=200 && response.status()<300 && data?.result==='success' && !data.errors?.length;
+   const success=ok && (endpoint.endsWith('/getOrderPackageDetailInfo')
+    ? String(data.orderPackageDetailInfo?.opOrderPackageId)===String(payload.opOrderPackageId)
+    : endpoint.endsWith('/batchCheckOrdersHasCancelWaybill') || (Number.isInteger(data.successCount)&&data.successCount>0&&data.failCount===0));
    result={status:response.status(),body,archive};
+   if(success)return result;
+   await save(dir,'response.txt',body);
+   if(data!==undefined)await save(dir,'response.json',body);
   }else result={state:sent?'unknown':'not_sent',error:sent?'请求已发出但未收到妙手响应，请在妙手核对后再操作。':requestSaved?'网页未完成请求，请重新打开妙手登录页面。':'请求未发出，请检查网页登录状态或请求存档。',archive};
  }catch{result={state:sent?'unknown':'not_sent',error:sent?'提交结果或响应存档未完成，请在妙手核对后再操作。':'提交准备失败，请检查浏览器服务。',archive}}
  finally{page.off('response',onResponse);await page.unroute(url,route).catch(()=>{})}

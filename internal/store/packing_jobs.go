@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"order_processor/internal/domain/packing"
+	"strconv"
 	"time"
 )
 
@@ -21,22 +22,31 @@ func migratePackingJobs(db *sql.DB) error {
  request_json TEXT NOT NULL,lines_json TEXT NOT NULL,state TEXT NOT NULL,result_json TEXT NOT NULL DEFAULT '{}',UNIQUE(job_id,package_id));
  CREATE TABLE IF NOT EXISTS shipping_labels(
  account_id INTEGER NOT NULL REFERENCES accounts(id),package_id TEXT NOT NULL,result_json TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(account_id,package_id));
+ DROP TABLE IF EXISTS supplier_leases;
  CREATE INDEX IF NOT EXISTS packing_jobs_account ON packing_jobs(account_id,id);
  CREATE INDEX IF NOT EXISTS packing_items_state ON packing_job_items(job_id,state,id);`)
 	return err
 }
 func (s PackingJobs) Candidates(account, source string, gifts bool) ([]packing.Candidate, error) {
+	lines, _, err := s.CandidatesWithSupplier(account, source, gifts)
+	return lines, err
+}
+
+// Resolve the supplier from the same account-scoped report as the selected lines.
+func (s PackingJobs) CandidatesWithSupplier(account, source string, gifts bool) ([]packing.Candidate, int64, error) {
 	report, err := Procurement(s.DB, account, gifts)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := []packing.Candidate{}
+	var supplierID int64
 	for _, g := range objects(report["groups"]) {
 		supplier, _ := g["supplier"].(object)
 		fromSupplier := text(supplier["id"]) != "" && text(supplier["id"]) != "0" && source == "supplier:"+text(supplier["id"])
 		if text(g["key"]) != source && !fromSupplier {
 			continue
 		}
+		supplierID, _ = strconv.ParseInt(text(supplier["id"]), 10, 64)
 		for _, v := range objects(g["variants"]) {
 			for _, l := range objects(v["lines"]) {
 				var quantity int64
@@ -47,27 +57,51 @@ func (s PackingJobs) Candidates(account, source string, gifts bool) ([]packing.C
 		}
 	}
 	if len(out) > 0 {
-		return out, nil
+		return out, supplierID, nil
 	}
-	return nil, errors.New("该货源或厂家已不在采购需求中，请刷新采购汇总")
+	return nil, 0, errors.New("该货源或厂家已不在采购需求中，请刷新采购汇总")
 }
 func (s PackingJobs) Create(ctx context.Context, account string, in packing.BatchInput, items []packing.JobItem) (int64, error) {
-	return s.create(ctx, account, in, items, "queued", "pending")
+	return s.create(ctx, account, in, items, "queued", "pending", nil)
 }
 
-func (s PackingJobs) create(ctx context.Context, account string, in packing.BatchInput, items []packing.JobItem, state, itemState string) (int64, error) {
+func (s PackingJobs) CreateWithLease(ctx context.Context, account string, in packing.BatchInput, items []packing.JobItem, lease SupplierLease) (int64, error) {
+	return s.create(ctx, account, in, items, "queued", "pending", &lease)
+}
+
+func (s PackingJobs) create(ctx context.Context, account string, in packing.BatchInput, items []packing.JobItem, state, itemState string, lease *SupplierLease) (int64, error) {
+	if lease != nil {
+		accountID, err := strconv.ParseInt(account, 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		purchases := purchasesFor(s.DB)
+		purchases.RLock()
+		defer purchases.RUnlock()
+		if err := purchases.verify(supplierKey{accountID, lease.Supplier}, *lease); err != nil {
+			return 0, err
+		}
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
+	var activeAccount bool
+	if err = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted=0)", account).Scan(&activeAccount); err != nil {
+		return 0, err
+	}
+	if !activeAccount {
+		return 0, errors.New("账户不存在")
+	}
+
 	if state == "running" {
 		var blocked int
-		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM packing_job_items WHERE state IN ('running','unknown')`).Scan(&blocked); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM packing_job_items WHERE state='running'`).Scan(&blocked); err != nil {
 			return 0, err
 		}
 		if blocked > 0 {
-			return 0, errors.New("已有包裹正在提交或结果待核对，请先到任务管理处理")
+			return 0, errors.New("已有包裹正在提交，请稍后重试")
 		}
 	}
 	// Catch repeated saves while an earlier task still owns the selected lines.
@@ -122,7 +156,7 @@ func (s PackingJobs) create(ctx context.Context, account string, in packing.Batc
 	return id, tx.Commit()
 }
 func (s PackingJobs) List(ctx context.Context, account string) ([]packing.Job, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,source_key,state,interval_seconds,created_at,updated_at FROM packing_jobs WHERE account_id=? ORDER BY id DESC LIMIT 100`, account)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,source_key,state,interval_seconds,created_at,updated_at FROM packing_jobs WHERE account_id=? ORDER BY id DESC`, account)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +228,7 @@ func (s PackingJobs) Detail(ctx context.Context, account string, id int64) (pack
 		if err = json.Unmarshal([]byte(lines), &i.Lines); err != nil {
 			return j, err
 		}
-		if result != "{}" {
+		if result != "{}" && i.State != "completed" {
 			if err = json.Unmarshal([]byte(result), &i.Result); err != nil {
 				return j, err
 			}
@@ -225,6 +259,14 @@ func (s PackingJobs) Detail(ctx context.Context, account string, id int64) (pack
 	}
 	return j, rows.Err()
 }
+
+// A cancellation stops pending work. If every package was subsequently
+// confirmed completed or skipped, the job has no cancelled work left.
+const resolvedPackingJobs = `UPDATE packing_jobs SET state='completed'
+ WHERE state IN ('cancelled','completed_errors','paused')
+ AND EXISTS (SELECT 1 FROM packing_job_items WHERE job_id=packing_jobs.id)
+ AND NOT EXISTS (SELECT 1 FROM packing_job_items WHERE job_id=packing_jobs.id AND state NOT IN ('completed','skipped'))`
+
 func (s PackingJobs) Recover(ctx context.Context) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -232,13 +274,13 @@ func (s PackingJobs) Recover(ctx context.Context) error {
 	}
 	defer tx.Rollback()
 	result, _ := json.Marshal(packing.Result{State: "unknown", Message: "服务重启时该包裹正在提交，结果未知。请在妙手核对后处理；其余包裹已保留。"})
-	if _, err = tx.ExecContext(ctx, `UPDATE packing_jobs SET state='paused' WHERE state!='cancelled' AND id IN (SELECT job_id FROM packing_job_items WHERE state='running')`); err != nil {
-		return err
-	}
 	if _, err = tx.ExecContext(ctx, `UPDATE packing_job_items SET state='unknown',result_json=? WHERE state='running'`, string(result)); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE packing_jobs SET state='queued' WHERE state='running'`); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE packing_jobs SET state=CASE WHEN EXISTS(SELECT 1 FROM packing_job_items WHERE job_id=packing_jobs.id AND state='pending') THEN 'queued' ELSE 'completed_errors' END WHERE state='running'`); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, resolvedPackingJobs); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -251,7 +293,7 @@ func (s PackingJobs) Claim(ctx context.Context, now time.Time) (*packing.JobItem
 	defer tx.Rollback()
 	var i packing.JobItem
 	var request, lines string
-	err = tx.QueryRowContext(ctx, `SELECT i.id,i.job_id,j.account_id,i.request_json,i.lines_json FROM packing_job_items i JOIN packing_jobs j ON i.job_id=j.id WHERE j.state='queued' AND i.state='pending' AND j.next_run_at<=? AND ? >= (SELECT COALESCE(max(next_run_at),0) FROM packing_jobs) AND NOT EXISTS(SELECT 1 FROM packing_job_items WHERE state IN ('running','unknown')) ORDER BY j.id,i.id LIMIT 1`, now.UnixMilli(), now.UnixMilli()).Scan(&i.ID, &i.JobID, &i.Account, &request, &lines)
+	err = tx.QueryRowContext(ctx, `SELECT i.id,i.job_id,j.account_id,i.request_json,i.lines_json FROM packing_job_items i JOIN packing_jobs j ON i.job_id=j.id WHERE j.state='queued' AND i.state='pending' AND j.next_run_at<=? AND ? >= (SELECT COALESCE(max(next_run_at),0) FROM packing_jobs) AND NOT EXISTS(SELECT 1 FROM packing_job_items WHERE state='running') ORDER BY j.id,(i.result_json != '{}'),i.id LIMIT 1`, now.UnixMilli(), now.UnixMilli()).Scan(&i.ID, &i.JobID, &i.Account, &request, &lines)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -283,9 +325,12 @@ func (s PackingJobs) Finish(ctx context.Context, item packing.JobItem, result pa
 		result.State = "unknown"
 		result.Message = "无法确认提交结果，请在妙手核对"
 	}
-	raw, err := json.Marshal(result)
-	if err != nil {
-		return err
+	raw := []byte("{}")
+	if result.State != "completed" {
+		raw, err = json.Marshal(result)
+		if err != nil {
+			return err
+		}
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE packing_job_items SET state=?,result_json=? WHERE id=? AND state='running'`, result.State, string(raw), item.ID); err != nil {
 		return err
@@ -302,9 +347,7 @@ func (s PackingJobs) Finish(ctx context.Context, item packing.JobItem, result pa
 		return err
 	}
 	if state != "cancelled" {
-		if result.State != "completed" {
-			state = "paused"
-		} else if pending == 0 {
+		if pending == 0 {
 			state = "completed"
 			if problems > 0 {
 				state = "completed_errors"
@@ -316,9 +359,25 @@ func (s PackingJobs) Finish(ctx context.Context, item packing.JobItem, result pa
 	if _, err = tx.ExecContext(ctx, `UPDATE packing_jobs SET state=?,updated_at=?,next_run_at=? WHERE id=?`, state, now.UTC().Format(time.RFC3339Nano), now.Add(time.Duration(interval)*time.Second).UnixMilli(), item.JobID); err != nil {
 		return err
 	}
+	if state == "cancelled" {
+		if _, err = tx.ExecContext(ctx, resolvedPackingJobs+" AND id=?", item.JobID); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 func (s PackingJobs) Action(ctx context.Context, account string, id int64, action string, itemID int64) error {
+	return s.itemAction(ctx, account, id, action, itemID, nil)
+}
+
+func (s PackingJobs) RetryEdited(ctx context.Context, account string, id, itemID int64, request packing.Request) error {
+	if err := request.Validate(); err != nil {
+		return err
+	}
+	return s.itemAction(ctx, account, id, "retry", itemID, &request)
+}
+
+func (s PackingJobs) itemAction(ctx context.Context, account string, id int64, action string, itemID int64, edited *packing.Request) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -339,11 +398,11 @@ func (s PackingJobs) Action(ctx context.Context, account string, id int64, actio
 			return errors.New("只能继续已暂停的任务")
 		}
 		var unresolved int
-		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM packing_job_items WHERE job_id=? AND state IN ('unknown','partial','running')`, id).Scan(&unresolved); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM packing_job_items WHERE job_id=? AND state='running'`, id).Scan(&unresolved); err != nil {
 			return err
 		}
 		if unresolved > 0 {
-			return errors.New("请先核对结果未知或部分成功的包裹，当前正在提交的包裹需等待返回")
+			return errors.New("请等待当前正在提交的包裹返回")
 		}
 		var pending int
 		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM packing_job_items WHERE job_id=? AND state='pending'`, id).Scan(&pending); err != nil {
@@ -362,17 +421,14 @@ func (s PackingJobs) Action(ctx context.Context, account string, id int64, actio
 			return err
 		}
 	case "retry", "confirm-completed", "skip":
-		if state != "paused" && state != "completed_errors" && state != "cancelled" {
-			return errors.New("请先暂停任务并等待当前包裹返回")
-		}
 		if state == "cancelled" && action == "retry" {
 			return errors.New("已取消的任务不能重新排队")
 		}
-		var itemState string
-		if err = tx.QueryRowContext(ctx, `SELECT state FROM packing_job_items WHERE id=? AND job_id=?`, itemID, id).Scan(&itemState); err != nil {
+		var itemState, saved string
+		if err = tx.QueryRowContext(ctx, `SELECT state,request_json FROM packing_job_items WHERE id=? AND job_id=?`, itemID, id).Scan(&itemState, &saved); err != nil {
 			return err
 		}
-		if itemState != "failed" && itemState != "not_sent" && itemState != "unknown" && itemState != "partial" {
+		if itemState != "failed" && itemState != "not_sent" && itemState != "unknown" && itemState != "partial" && !(action == "retry" && itemState == "skipped") {
 			return errors.New("该包裹无需处理")
 		}
 		next := "pending"
@@ -382,28 +438,45 @@ func (s PackingJobs) Action(ctx context.Context, account string, id int64, actio
 		if action == "skip" {
 			next = "skipped"
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE packing_job_items SET state=? WHERE id=?`, next, itemID); err != nil {
+		if edited != nil {
+			var original packing.Request
+			if err = json.Unmarshal([]byte(saved), &original); err != nil {
+				return err
+			}
+			if original.PackageID != edited.PackageID || len(original.Items) != len(edited.Items) {
+				return errors.New("包裹或商品范围已变化")
+			}
+			ids := map[string]bool{}
+			for _, i := range original.Items {
+				ids[i.OrderItemID] = true
+			}
+			for _, i := range edited.Items {
+				if !ids[i.OrderItemID] {
+					return errors.New("包含原包裹之外的商品")
+				}
+			}
+			raw, err := json.Marshal(edited)
+			if err != nil {
+				return err
+			}
+			saved = string(raw)
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE packing_job_items SET state=?,request_json=? WHERE id=? AND job_id=?`, next, saved, itemID, id); err != nil {
 			return err
 		}
-		if state != "cancelled" {
-			state = "paused"
+		if action == "retry" && (state == "completed_errors" || state == "completed") {
+			state = "queued"
 		}
+
 	default:
 		return errors.New("任务操作不存在")
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE packing_jobs SET state=?,updated_at=? WHERE id=?`, state, time.Now().UTC().Format(time.RFC3339Nano), id); err != nil {
 		return err
 	}
-	// Resolving the last error completes the task without requiring an empty resume.
-	if state == "paused" && (action == "skip" || action == "confirm-completed") {
-		var remaining int
-		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM packing_job_items WHERE job_id=? AND state NOT IN ('completed','skipped','cancelled')`, id).Scan(&remaining); err != nil {
+	if action == "skip" || action == "confirm-completed" {
+		if _, err = tx.ExecContext(ctx, resolvedPackingJobs+" AND id=?", id); err != nil {
 			return err
-		}
-		if remaining == 0 {
-			if _, err = tx.ExecContext(ctx, `UPDATE packing_jobs SET state='completed' WHERE id=?`, id); err != nil {
-				return err
-			}
 		}
 	}
 	return tx.Commit()

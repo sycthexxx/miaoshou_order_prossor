@@ -73,6 +73,7 @@ func (d *Docker) run(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 type inspection struct {
+	ID              string
 	State           struct{ Running bool }
 	Config          struct{ Labels map[string]string }
 	NetworkSettings struct {
@@ -103,6 +104,14 @@ func localPort(v inspection, key string) (*url.URL, error) {
 	return url.Parse("http://127.0.0.1:" + ports[0].HostPort)
 }
 func (d *Docker) Resolve(ctx context.Context, key string, create bool) (Target, error) {
+	return d.resolve(ctx, key, create, false)
+}
+
+func (d *Docker) Restart(ctx context.Context, key string) (Target, error) {
+	return d.resolve(ctx, key, false, true)
+}
+
+func (d *Docker) resolve(ctx context.Context, key string, create, restart bool) (Target, error) {
 	if !accountKey.MatchString(key) {
 		return Target{}, runtimeError("account_invalid", "账户标识无效")
 	}
@@ -138,7 +147,11 @@ func (d *Docker) Resolve(ctx context.Context, key string, create bool) (Target, 
 		if e != nil {
 			return Target{}, runtimeError("container_session_missing", "已有容器的会话凭据缺失")
 		}
-		if !info.State.Running {
+		if restart {
+			if _, e = d.run(ctx, "restart", info.ID); e != nil {
+				return Target{}, runtimeError("container_restart_failed", "重启账户浏览器容器失败，请查看 Docker 状态")
+			}
+		} else if !info.State.Running {
 			if !create {
 				return Target{}, ErrNotStarted
 			}
@@ -185,7 +198,7 @@ func (d *Docker) Resolve(ctx context.Context, key string, create bool) (Target, 
 		return Target{}, e
 	}
 	target := Target{API: api, Desktop: desktop, Token: strings.TrimSpace(string(token))}
-	if create {
+	if create || restart {
 		if e = waitReady(ctx, target, key); e != nil {
 			return Target{}, e
 		}
@@ -216,4 +229,27 @@ func waitReady(ctx context.Context, t Target, key string) error {
 		case <-tick.C:
 		}
 	}
+}
+
+// Stop the owned browser only; the profile and order archives remain on disk.
+func (d *Docker) Stop(ctx context.Context, key string) error {
+	if !accountKey.MatchString(key) {
+		return runtimeError("account_invalid", "账户标识无效")
+	}
+	lock := d.lock(key)
+	lock.Lock()
+	defer lock.Unlock()
+	info, err := d.inspect(ctx, d.Prefix+key)
+	if err != nil {
+		return err
+	}
+	if info.Config.Labels["order-processor.account"] != key || info.Config.Labels["order-processor.data"] != d.DataDir {
+		return runtimeError("container_owner_mismatch", "同名容器不属于当前账户或数据目录")
+	}
+	if info.State.Running {
+		if _, err = d.run(ctx, "stop", info.ID); err != nil {
+			return runtimeError("container_stop_failed", "停止账户浏览器容器失败")
+		}
+	}
+	return nil
 }

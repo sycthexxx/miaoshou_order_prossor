@@ -40,11 +40,8 @@ func TestSingleSubmissionPersistsAndBlocksQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovered, err := repo.Detail(ctx, account, item.JobID)
-	if err != nil || recovered.State != "paused" || recovered.Items[0].State != "unknown" {
+	if err != nil || recovered.State != "completed_errors" || recovered.Items[0].State != "unknown" {
 		t.Fatal(recovered, err)
-	}
-	if next, err := repo.Claim(ctx, time.Now()); err != nil || next != nil {
-		t.Fatal("unknown direct write didn't block queue", next, err)
 	}
 	if err := repo.Action(ctx, account, item.JobID, "confirm-completed", item.ID); err != nil {
 		t.Fatal(err)

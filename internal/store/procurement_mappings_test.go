@@ -25,7 +25,7 @@ func TestProcurementMappingSaveUpdateIsolationAndConflict(t *testing.T) {
 	if _, e = GetProcurementMapping(db, other, "100"); !errors.Is(e, ErrProcurementMappingSource) {
 		t.Fatal(e)
 	}
-	saved, e := SaveProcurementMapping(db, account, "100", 0, sampleMapping("藏青色"))
+	saved, e := SaveProcurementMapping(db, 1, account, "100", 0, sampleMapping("藏青色"))
 	if e != nil || saved.Revision != 1 {
 		t.Fatal(saved, e)
 	}
@@ -34,7 +34,7 @@ func TestProcurementMappingSaveUpdateIsolationAndConflict(t *testing.T) {
 	if e = db.QueryRow("SELECT id,updated_at FROM procurement_mappings").Scan(&id, &at); e != nil || id <= 0 {
 		t.Fatal(id, e)
 	}
-	stale, e := SaveProcurementMapping(db, account, "100", 0, sampleMapping("错误覆盖"))
+	stale, e := SaveProcurementMapping(db, 1, account, "100", 0, sampleMapping("错误覆盖"))
 	if !errors.Is(e, ErrProcurementMappingConflict) || !reflect.DeepEqual(stale, saved) {
 		t.Fatal(stale, e)
 	}
@@ -43,7 +43,7 @@ func TestProcurementMappingSaveUpdateIsolationAndConflict(t *testing.T) {
 	if unchangedAt != at {
 		t.Fatal("conflict modified timestamp")
 	}
-	updated, e := SaveProcurementMapping(db, account, "100", 1, sampleMapping("深蓝色"))
+	updated, e := SaveProcurementMapping(db, 1, account, "100", 1, sampleMapping("深蓝色"))
 	if e != nil || updated.Revision != 2 {
 		t.Fatal(updated, e)
 	}
@@ -61,20 +61,20 @@ func TestProcurementMappingSaveUpdateIsolationAndConflict(t *testing.T) {
 	if e != nil || got.Revision != 0 {
 		t.Fatal(got, e)
 	}
-	if _, e = SaveProcurementMapping(db, other, "100", 0, sampleMapping("另一账户颜色")); e != nil {
+	if _, e = SaveProcurementMapping(db, 1, other, "100", 0, sampleMapping("另一账户颜色")); e != nil {
 		t.Fatal(e)
 	}
 	got, e = GetProcurementMapping(db, account, "100")
 	if e != nil || got.Mapping.Colors["海军蓝"] != "深蓝色" {
 		t.Fatal("cross-account mapping leaked", got, e)
 	}
-	if _, e = SaveProcurementMapping(db, account, "999", 0, sampleMapping("未知商品")); !errors.Is(e, ErrProcurementMappingSource) {
+	if _, e = SaveProcurementMapping(db, 1, account, "999", 0, sampleMapping("未知商品")); !errors.Is(e, ErrProcurementMappingSource) {
 		t.Fatal(e)
 	}
 	if captureCount(t, db, "procurement_mappings") != 2 {
 		t.Fatal("unknown product created mapping")
 	}
-	cleared, e := SaveProcurementMapping(db, account, "100", 2, ProcurementMapping{Version: 2})
+	cleared, e := SaveProcurementMapping(db, 1, account, "100", 2, ProcurementMapping{Version: 2})
 	if e != nil || cleared.Revision != 3 || !reflect.DeepEqual(cleared.Mapping, emptyProcurementMapping()) {
 		t.Fatal(cleared, e)
 	}
@@ -82,7 +82,7 @@ func TestProcurementMappingSaveUpdateIsolationAndConflict(t *testing.T) {
 func TestProcurementMappingConcurrentRevisionDoesNotOverwrite(t *testing.T) {
 	db, account, _ := captureFixture(t)
 	captureProduct(t, db, account, "100", "")
-	if _, e := SaveProcurementMapping(db, account, "100", 0, sampleMapping("原始")); e != nil {
+	if _, e := SaveProcurementMapping(db, 1, account, "100", 0, sampleMapping("原始")); e != nil {
 		t.Fatal(e)
 	}
 	results := make(chan error, 2)
@@ -91,7 +91,7 @@ func TestProcurementMappingConcurrentRevisionDoesNotOverwrite(t *testing.T) {
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
-			_, e := SaveProcurementMapping(db, account, "100", 1, sampleMapping(name))
+			_, e := SaveProcurementMapping(db, 1, account, "100", 1, sampleMapping(name))
 			results <- e
 		}(name)
 	}
@@ -133,7 +133,7 @@ func TestProcurementMappingSurvivesReplayWithoutChangingOriginalPayloads(t *test
 	}
 	var originalProduct string
 	db.QueryRow("SELECT payload FROM shop_products").Scan(&originalProduct)
-	saved, e := SaveProcurementMapping(db, account, "100", 0, sampleMapping("藏青色"))
+	saved, e := SaveProcurementMapping(db, 1, account, "100", 0, sampleMapping("藏青色"))
 	if e != nil {
 		t.Fatal(e)
 	}

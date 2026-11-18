@@ -55,7 +55,7 @@ func packingJobRoutes(ctx context.Context, mux *http.ServeMux, g *browserGateway
 		if in.Name == "" {
 			in.Name = "货源代打包"
 		}
-		candidates, err := repo.Candidates(account, in.SourceKey, in.Gifts)
+		candidates, supplierID, err := repo.CandidatesWithSupplier(account, in.SourceKey, in.Gifts)
 		if err != nil {
 			send(w, 400, map[string]string{"error": err.Error()})
 			return
@@ -72,7 +72,9 @@ func packingJobRoutes(ctx context.Context, mux *http.ServeMux, g *browserGateway
 				return
 			}
 		}
-		id, err := repo.Create(r.Context(), account, in, items)
+		leaseID, _ := strconv.ParseInt(r.Header.Get("X-Supplier-Lease"), 10, 64)
+		lease := store.SupplierLease{ID: leaseID, UserID: currentUser(r).ID, Supplier: supplierID}
+		id, err := repo.CreateWithLease(r.Context(), account, in, items, lease)
 		if err != nil {
 			send(w, 409, map[string]string{"error": err.Error()})
 			return
@@ -107,13 +109,20 @@ func packingJobRoutes(ctx context.Context, mux *http.ServeMux, g *browserGateway
 	mux.HandleFunc("POST /api/accounts/{id}/packing-jobs/{job}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		id, _ := strconv.ParseInt(r.PathValue("job"), 10, 64)
 		var in struct {
-			ItemID int64 `json:"itemId"`
+			ItemID  int64            `json:"itemId"`
+			Request *packing.Request `json:"request"`
 		}
-		if r.ContentLength != 0 && json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in) != nil {
+		if r.ContentLength != 0 && json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&in) != nil {
 			send(w, 400, map[string]string{"error": "操作格式错误"})
 			return
 		}
-		if err := repo.Action(r.Context(), r.PathValue("id"), id, r.PathValue("action"), in.ItemID); err != nil {
+		var err error
+		if in.Request != nil && r.PathValue("action") == "retry" {
+			err = repo.RetryEdited(r.Context(), r.PathValue("id"), id, in.ItemID, *in.Request)
+		} else {
+			err = repo.Action(r.Context(), r.PathValue("id"), id, r.PathValue("action"), in.ItemID)
+		}
+		if err != nil {
 			send(w, 409, map[string]string{"error": err.Error()})
 			return
 		}

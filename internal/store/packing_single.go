@@ -25,7 +25,7 @@ func (s PackingJobs) StartSingle(ctx context.Context, account string, request pa
 		packageNo = request.PackageID
 	}
 	item := packing.JobItem{Account: account, Request: request, Lines: lines, State: "running"}
-	id, err := s.create(ctx, account, packing.BatchInput{Name: "单包裹代打包 · " + packageNo, IntervalSeconds: 5}, []packing.JobItem{item}, "running", "running")
+	id, err := s.create(ctx, account, packing.BatchInput{Name: "单包裹代打包 · " + packageNo, IntervalSeconds: 5}, []packing.JobItem{item}, "running", "running", nil)
 	if err != nil {
 		return packing.JobItem{}, err
 	}

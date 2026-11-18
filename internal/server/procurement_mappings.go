@@ -14,6 +14,8 @@ func procurementMappingRoutes(mux *http.ServeMux, db *sql.DB) {
 		switch {
 		case e == nil:
 			send(w, http.StatusOK, result)
+		case errors.Is(e, store.ErrSupplierBusy):
+			send(w, http.StatusConflict, map[string]string{"error": e.Error()})
 		case errors.Is(e, store.ErrProcurementMappingConflict):
 			send(w, http.StatusConflict, map[string]any{"error": e.Error(), "revision": result.Revision, "mapping": result.Mapping})
 		case errors.Is(e, store.ErrProcurementMappingInput), errors.Is(e, store.ErrProcurementMappingSource):
@@ -47,7 +49,7 @@ func procurementMappingRoutes(mux *http.ServeMux, db *sql.DB) {
 			send(w, http.StatusBadRequest, map[string]string{"error": "采购映射格式错误，请提供revision和mapping；不接受DOM选择器等未知字段"})
 			return
 		}
-		result, e := store.SaveProcurementMapping(db, id, r.PathValue("offerId"), *in.Revision, in.Mapping)
+		result, e := store.SaveProcurementMapping(db, currentUser(r).ID, id, r.PathValue("offerId"), *in.Revision, in.Mapping)
 		respond(w, result, e)
 	})
 }

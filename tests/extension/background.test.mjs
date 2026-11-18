@@ -1,12 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 let receive,removed,nextID=10,configured='',relayResult={ok:true,result:{assigned:1,updated:0,retained:0,created:true,supplierName:'甲厂'}};
+let settings={account:"7",gifts:true};
 const local={},session={},tabs=new Map(),relays=[];
 globalThis.chrome={
  runtime:{getManifest:()=>({version:'0.1.8'}),onMessage:{addListener:fn=>{receive=fn}},onInstalled:{addListener:()=>{}},onStartup:{addListener:()=>{}}},
  storage:{local:{get:async()=>({...local,workbenchOrigin:configured}),set:async data=>Object.assign(local,data)},session:{get:async key=>({[key]:session[key]}),set:async data=>Object.assign(session,data),remove:async key=>{delete session[key]}}},
  scripting:{executeScript:async()=>{}},
- tabs:{create:async data=>{const tab={id:++nextID,status:'complete',...data};tabs.set(tab.id,tab);return tab},get:async id=>{if(!tabs.has(id))throw Error('closed');return tabs.get(id)},update:async(id,data)=>Object.assign(tabs.get(id),data),remove:async id=>tabs.delete(id),onRemoved:{addListener:fn=>{removed=fn}},sendMessage:async(id,data,options)=>{relays.push({id,data,options});return relayResult}}
+ tabs:{query:async()=>Array.from(tabs.values()),create:async data=>{const tab={id:++nextID,status:'complete',...data};tabs.set(tab.id,tab);return tab},get:async id=>{if(!tabs.has(id))throw Error('closed');return tabs.get(id)},update:async(id,data)=>Object.assign(tabs.get(id),data),remove:async id=>tabs.delete(id),onRemoved:{addListener:fn=>{removed=fn}},sendMessage:async(id,data,options)=>{relays.push({id,data,options});return data.type==="GET_PLUGIN_QUERY_SETTINGS"?{ok:true,result:settings}:relayResult}}
 };
 await import('../../extensions/procurement-helper/background.js');
 const call=(message,sender)=>new Promise(resolve=>receive(message,sender,resolve));
@@ -60,26 +61,22 @@ test('mapping load and save use original server/account/offer, preserve revision
  const count=relays.length;assert.equal((await call({type:'GET_PROCUREMENT_MAPPING'},{...offerSender(offer),url:'https://detail.1688.com/offer/200.html'})).ok,false);assert.equal(relays.length,count);
 });
 
-test('direct offer lookup uses explicitly selected origin/account/gifts and keeps original snapshots',async()=>{
- configured='http://192.168.1.104:17381';const work=opening(configured+'/#/procurement');
- await call({type:'SELECT_PROCUREMENT_CONTEXT',payload:{account:'7',gifts:true}},work);
- relayResult={ok:true,result:{found:true,snapshot:{...payload,account:'7',createdAt:Date.now()}}};
- const offer=opening(payload.url);const result=await call({type:'GET_PROCUREMENT'},offer);
- assert.equal(result.task.account,'7');assert.equal(result.task.direct,true);assert.equal(relays.at(-1).data.gifts,true);assert.equal(relays.at(-1).data.origin,configured);
- const before=relays.length;await call({type:'GET_PROCUREMENT'},offer);assert.equal(relays.length,before);
- await call({type:'SELECT_PROCUREMENT_CONTEXT',payload:{account:'8',gifts:false}},work);
- assert.equal((await call({type:'GET_PROCUREMENT'},offer)).task.account,'7');
+test('direct lookup reads current server settings and automatically reopens a closed workbench',async()=>{
+ configured='http://192.168.1.104:17381';
+ tabs.clear();
+ const offer=opening(payload.url);
+ relayResult={ok:true,result:{found:true,snapshot:{...payload,account:'7'}}};
+ const result=await call({type:'GET_PROCUREMENT'},offer);
+ assert.equal(result.task.account,'7');
+ assert.equal(relays.at(-1).data.gifts,true);
+ const tab=tabs.get(relays.at(-1).id);
+ assert.equal(tab.url,configured+'/#/procurement');
+ assert.equal(tab.active,false);
+ settings={account:'8',gifts:false};
  relayResult={ok:true,result:{found:false,createdAt:Date.now()}};
- const miss=await call({type:'GET_PROCUREMENT'},opening(payload.url));assert.equal(miss.task,null);assert.match(miss.reason,/#8/);assert.match(miss.reason,/没有/);
- tabs.delete(work.tab.id);const closed=await call({type:'GET_PROCUREMENT'},opening(payload.url));assert.match(closed.reason,/连接工作台并查询/);
- delete local.procurementContext;const absent=await call({type:'GET_PROCUREMENT'},opening(payload.url));assert.match(absent.reason,/不会自动选择第一个账户/);
-});
-
-test('explicit reconnect restores chosen workbench without selecting its default account',async()=>{
- configured='http://192.168.1.104:17381';const work=opening(configured+'/#/procurement');
- await call({type:'SELECT_PROCUREMENT_CONTEXT',payload:{account:'9',gifts:false}},work);tabs.delete(work.tab.id);
- relayResult={ok:true,result:{found:true,snapshot:{...payload,account:'9',createdAt:Date.now()}}};
- const offer=opening(payload.url),r=await call({type:'GET_PROCUREMENT',connect:true},offer);
- assert.equal(r.task.account,'9');assert.equal(r.task.direct,true);assert.equal(local.procurementContext.account,'9');assert.notEqual(local.procurementContext.workbench.tabId,work.tab.id);
- assert.equal(tabs.get(local.procurementContext.workbench.tabId).url,configured+'/#/procurement');
+ const miss=await call({type:'GET_PROCUREMENT'},offer);
+ assert.equal(miss.task,null);
+ assert.match(miss.reason,/#8/);
+ assert.equal(relays.at(-1).id,tab.id);
+ assert.equal(relays.at(-1).data.gifts,false);
 });

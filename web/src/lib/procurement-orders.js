@@ -56,7 +56,17 @@ export function procurementOrderRows(group) {
  const rows=new Map();
  for(const order of orders.values()){
   const specs=[...order.specs.keys()].sort(),key=JSON.stringify(specs);
-  if(!rows.has(key))rows.set(key,{key,specs:specs.map(spec=>({spec,quantity:0})),quantity:0,orders:[]});
+  if(!rows.has(key)){
+   const lines=order.packages.flatMap(pkg=>pkg.lines);
+   const representatives=specs.map(spec=>{
+    const skus=new Map();
+    for(const line of lines){
+     if(line.spec===spec&&!skus.has(line.skuId))skus.set(line.skuId,line);
+    }
+    return {spec,quantity:0,skus:[...skus.values()]};
+   });
+   rows.set(key,{key,specs:representatives,quantity:0,orders:[]});
+  }
   const row=rows.get(key);row.orders.push(order);
   for(const spec of row.specs){const quantity=order.specs.get(spec.spec);spec.quantity+=quantity;row.quantity+=quantity}
  }

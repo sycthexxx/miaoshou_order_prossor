@@ -8,8 +8,13 @@ import (
 	"order_processor/internal/store"
 )
 
-func openAPIRoutes(mux *http.ServeMux, db *sql.DB, dir string, cache *procurementCache) {
+func openAPIRoutes(mux *http.ServeMux, db *sql.DB, dir string, cache *procurementCache, gateways ...*browserGateway) {
 	service := ordersync.New(store.OrderRepository{DB: db}, cache.invalidate)
+	var gateway *browserGateway
+	if len(gateways) > 0 {
+		gateway = gateways[0]
+		gateway.syncingOrders = func(id string) bool { return service.Status(id).State == "running" }
+	}
 	exists := func(w http.ResponseWriter, r *http.Request) bool {
 		if store.Exists(db, r.PathValue("id")) {
 			return true
@@ -32,10 +37,15 @@ func openAPIRoutes(mux *http.ServeMux, db *sql.DB, dir string, cache *procuremen
 		send(w, 200, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("POST /api/accounts/{id}/sync-openapi", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if gateway != nil {
+			g := gateway.gate(id)
+			g.Lock()
+			defer g.Unlock()
+		}
 		if !exists(w, r) {
 			return
 		}
-		id := r.PathValue("id")
 		saved, err := store.CurrentAPICredential(db, id)
 		if err == sql.ErrNoRows {
 			send(w, 400, map[string]string{"error": "请先在 API 管理中添加凭证并设为当前使用"})

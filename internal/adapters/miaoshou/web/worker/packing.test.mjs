@@ -59,7 +59,7 @@ test('native browser submission stores complete form and failure response with n
 });
 
 
-test('waybill adapter uses one package and preserves every native response',async()=>{
+test('waybill adapter returns successful responses without archiving them',async()=>{
  const root=await mkdtemp(path.join(tmpdir(),'waybill-test-'));
  const browser=await chromium.launch({headless:true});
  try{
@@ -71,7 +71,7 @@ test('waybill adapter uses one package and preserves every native response',asyn
    if(req.url()===moduleURL)return route.fulfill({contentType:'text/javascript',body:fixtureClient});
    if(Object.values(waybillEndpoints).some(endpoint=>url+endpoint===req.url())){
     requests.push({url:req.url(),form:new URLSearchParams(req.postData())});
-    return route.fulfill({contentType:'application/json',body:'{"result":"success","successCount":1,"failCount":0,"errors":[]}'});
+    return route.fulfill({contentType:'application/json',body:JSON.stringify({result:'success',successCount:1,failCount:0,errors:[],orderPackageDetailInfo:{opOrderPackageId:'2177632828'}})});
    }
    if(req.url()===url+'/order/package/index')return route.fulfill({contentType:'text/html',body:'fixture'});
    return route.abort();
@@ -80,7 +80,8 @@ test('waybill adapter uses one package and preserves every native response',asyn
   for(const action of ['inspect','check','apply']){
    const r=await requestWaybill({root,id:'1',session:{context},payload:{action,packageId:'2177632828'},resolveClient:async()=>({url:moduleURL,name:'clientV2'})});
    assert.equal(r.status,200);
-   assert.deepEqual(JSON.parse(await readFile(path.join(root,r.archive,'response.json'),'utf8')),JSON.parse(r.body));
+   assert.equal(JSON.parse(r.body).result,'success');
+   for(const file of ['response.json','response.txt','result.json'])await assert.rejects(readFile(path.join(root,r.archive,file)),{code:'ENOENT'});
   }
   assert.deepEqual(requests.map(r=>r.url),['inspect','check','apply'].map(a=>url+waybillEndpoints[a]));
   assert.equal(requests[0].form.get('opOrderPackageId'),'2177632828');

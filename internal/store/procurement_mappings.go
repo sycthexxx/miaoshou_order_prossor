@@ -112,19 +112,25 @@ func GetProcurementMapping(db *sql.DB, account, product string) (ProcurementMapp
 	}
 	return readProcurementMapping(db, account, product)
 }
-func SaveProcurementMapping(db *sql.DB, account, product string, expectedRevision int64, mapping ProcurementMapping) (ProcurementMappingRecord, error) {
+func SaveProcurementMapping(db *sql.DB, userID int64, account, product string, expectedRevision int64, mapping ProcurementMapping) (ProcurementMappingRecord, error) {
 	if expectedRevision < 0 || expectedRevision >= 9007199254740991 {
 		return ProcurementMappingRecord{}, ErrProcurementMappingInput
 	}
 	if e := validateProcurementMapping(&mapping); e != nil {
 		return ProcurementMappingRecord{}, e
 	}
+	purchases := purchasesFor(db)
+	purchases.RLock()
+	defer purchases.RUnlock()
 	tx, e := db.Begin()
 	if e != nil {
 		return ProcurementMappingRecord{}, e
 	}
 	defer tx.Rollback()
 	if e = requireProcurementSource(tx, account, product); e != nil {
+		return ProcurementMappingRecord{}, e
+	}
+	if e = purchases.checkSourceAvailable(tx, account, userID, "1688", product, nil, -1); e != nil {
 		return ProcurementMappingRecord{}, e
 	}
 	current, e := readProcurementMapping(tx, account, product)
