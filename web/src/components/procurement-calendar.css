@@ -1,0 +1,15 @@
+.flatpickr-calendar.procurement-calendar{
+ padding:8px 0 0;
+ border:1px solid #d6e4e5;
+ border-radius:12px;
+ box-shadow:0 8px 32px #234a5024;
+}
+.procurement-calendar .flatpickr-months{margin-bottom:6px}
+.procurement-calendar .flatpickr-current-month{font-size:16px}
+.procurement-calendar .flatpickr-day{border-radius:8px}
+.procurement-calendar .flatpickr-day.today{border-color:#009c99}
+.procurement-calendar .flatpickr-day.selected{background:#008e8c;border-color:#008e8c;color:white}
+.procurement-calendar .flatpickr-day:not(.flatpickr-disabled):not(.selected):hover{background:#e4f5f3;border-color:#e4f5f3}
+.procurement-calendar-footer{display:flex;justify-content:space-between;border-top:1px solid #e4eeee;padding:7px 12px}
+.procurement-calendar-footer button{background:transparent;border:0;box-shadow:none;color:#007b79;padding:5px 9px;min-height:30px}
+.procurement-calendar-footer button:disabled{opacity:.45}

@@ -25,6 +25,14 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, e
 	}
+	if _, e = db.Exec(`CREATE TABLE IF NOT EXISTS plugin_query_settings (
+        id INTEGER PRIMARY KEY CHECK(id=1),
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        include_gifts INTEGER NOT NULL DEFAULT 0
+    )`); e != nil {
+		db.Close()
+		return nil, e
+	}
 	if e = migrateOrders(db); e != nil {
 		db.Close()
 		return nil, e

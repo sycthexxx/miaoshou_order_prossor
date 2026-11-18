@@ -55,7 +55,14 @@ func (g *browserGateway) action(action string) http.HandlerFunc {
 			return
 		}
 		gate := g.gate(id)
-		if action != "status" {
+		restart := action == "restart-container"
+		if restart {
+			if !gate.TryLock() {
+				send(w, 409, map[string]string{"error": "账户浏览器正在执行其他操作，请稍后重试"})
+				return
+			}
+			defer gate.Unlock()
+		} else if action != "status" {
 			gate.Lock()
 			defer gate.Unlock()
 			if gate.desktop && action != "stop-sync" {
@@ -71,6 +78,28 @@ func (g *browserGateway) action(action string) http.HandlerFunc {
 		if g.runtime.Remote() {
 			mode = "docker"
 		}
+		workerAction := action
+		if restart {
+			runtime, ok := g.runtime.(interface {
+				Restart(context.Context, string) (browser.Target, error)
+			})
+			if !ok {
+				send(w, 409, map[string]string{"error": "仅容器模式支持重启"})
+				return
+			}
+			if e == nil {
+				probe, done := context.WithTimeout(ctx, 2*time.Second)
+				_, state, _ := g.call(probe, target, key, "GET", "status")
+				done()
+				job, _ := state["sync"].(map[string]any)
+				if job["state"] == "running" {
+					send(w, 409, map[string]string{"error": "订单正在同步，请在同步结束后重启容器"})
+					return
+				}
+			}
+			target, e = runtime.Restart(ctx, key)
+			workerAction = "login"
+		}
 		if errors.Is(e, browser.ErrNotStarted) && action == "status" {
 			send(w, 200, map[string]any{"state": "closed", "browserMode": mode})
 			return
@@ -80,7 +109,11 @@ func (g *browserGateway) action(action string) http.HandlerFunc {
 			send(w, 503, map[string]string{"error": message, "errorCode": code, "browserMode": mode})
 			return
 		}
-		status, data, e := g.call(ctx, target, key, r.Method, action)
+		status, data, e := g.call(ctx, target, key, r.Method, workerAction)
+		if restart && (e != nil || status != 200 || data["state"] == "closed" || data == nil) {
+			send(w, 503, map[string]string{"error": "容器已重启，浏览器未打开，请点击「打开远程浏览器」重试", "browserMode": mode})
+			return
+		}
 		if e != nil {
 			send(w, 503, map[string]string{"error": "浏览器服务暂不可用，请查看启动终端", "errorCode": "worker_unavailable", "browserMode": mode})
 			return

@@ -3,23 +3,34 @@ import {registerWorkbench,hostPattern} from './connection.js';
 const {snapshot,offerId}=globalThis.OPProcurement;
 const defaults=['http://127.0.0.1:17381','http://localhost:17381'];
 async function allowedOrigin(url){const {workbenchOrigin}=await chrome.storage.local.get('workbenchOrigin');return [...defaults,workbenchOrigin].includes(new URL(url).origin)}
+const connecting=new Map();
+async function findWorkbench(origin){
+ const tabs=await chrome.tabs.query({url:hostPattern(origin)});
+ let tab=tabs.find(tab=>tab.url&&new URL(tab.url).origin===origin);
+ if(!tab)tab=await chrome.tabs.create({url:origin+'/#/procurement',active:false});
+ for(let i=0;tab.status==='loading'&&i<60;i++){
+  await new Promise(resolve=>setTimeout(resolve,250));
+  tab=await chrome.tabs.get(tab.id);
+ }
+ if(!tab.url||new URL(tab.url).origin!==origin)throw Error('后台地址已变更，请检查插件设置');
+ await chrome.scripting.executeScript({target:{tabId:tab.id},files:['bridge.js']});
+ return tab;
+}
+function workbenchTab(origin){
+ if(!connecting.has(origin))connecting.set(origin,findWorkbench(origin).finally(()=>connecting.delete(origin)));
+ return connecting.get(origin);
+}
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
  (async()=>{
   if(message.type==='BRIDGE_STATUS'){
    if(!sender.tab||sender.frameId!==0||!await allowedOrigin(sender.url))throw Error('未连接当前工作台，请点击插件图标保存并授权此地址');
    return {ok:true,version:chrome.runtime.getManifest().version};
   }
-  if(message.type==='SELECT_PROCUREMENT_CONTEXT'){
-   if(!sender.tab||sender.frameId!==0||!await allowedOrigin(sender.url))throw Error('请先授权当前工作台');
-   const account=String(message.payload?.account||'');if(!/^[1-9][0-9]*$/.test(account))throw Error('请选择账户');
-   await chrome.storage.local.set({procurementContext:{account,gifts:message.payload.gifts===true,workbench:{tabId:sender.tab.id,origin:new URL(sender.url).origin}}});return {ok:true};
-  }
   if(message.type==='OPEN_PROCUREMENT'){
    if(!sender.tab||sender.frameId!==0||!await allowedOrigin(sender.url))throw Error('请先在插件设置中配置当前工作台地址');
    const p=snapshot(message.payload);
    if(!/^[1-9][0-9]*$/.test(p.account))throw Error('账户标识无效');
    p.workbench={tabId:sender.tab.id,origin:new URL(sender.url).origin};
-   await chrome.storage.local.set({procurementContext:{account:p.account,gifts:message.payload.gifts===true,workbench:p.workbench}});
    const tab=await chrome.tabs.create({url:'about:blank',active:true});
    try{await chrome.storage.session.set({['task:'+tab.id]:p});await chrome.tabs.update(tab.id,{url:p.url})}catch(e){await chrome.tabs.remove(tab.id);throw e}
    return {ok:true};
@@ -27,23 +38,17 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(message.type==='GET_PROCUREMENT'){
    const id=offerId(sender.url);if(!sender.tab||!id||sender.frameId!==0)throw Error('无效货源页面');
    const key='task:'+sender.tab.id;const data=await chrome.storage.session.get(key);let task=data[key];
-   if(task?.offerId!==id||message.reload===true&&task?.direct){
-    const {procurementContext:context,workbenchOrigin}=await chrome.storage.local.get(['procurementContext','workbenchOrigin']);
-    const connectURL=context?.workbench?.origin||workbenchOrigin||'';
-    if(!context)return {ok:true,task:null,connectURL,reason:'请在工作台采购汇总选择账户，点击“设为插件查询账户”；不会自动选择第一个账户。'};
-    const {workbench,account,gifts}=context;
-    let tab;try{tab=await chrome.tabs.get(workbench.tabId)}catch{}
-    if(message.connect===true&&(!tab||new URL(tab.url).origin!==workbench.origin)){
-     if(!await allowedOrigin(workbench.origin))throw Error('所选服务器未授权，请先打开插件设置授权');
-     tab=await chrome.tabs.create({url:workbench.origin+'/#/procurement',active:false});
-     for(let attempt=0;attempt<60;attempt++){tab=await chrome.tabs.get(tab.id);if(tab.status==='complete')break;await new Promise(r=>setTimeout(r,250))}
-     await chrome.scripting.executeScript({target:{tabId:tab.id},files:['bridge.js']});
-     const ready=await chrome.tabs.sendMessage(tab.id,{type:'REFRESH_WORKBENCH_BRIDGE'},{frameId:0});if(!ready?.ok)throw Error('工作台未连接，请刷新后重试');
-     workbench.tabId=tab.id;await chrome.storage.local.set({procurementContext:context});
-    }
-    if(!tab)return {ok:true,task:null,connectURL,reason:'工作台标签页已关闭。点击“连接工作台并查询”，将使用已选择的账户重新连接。'};
-    if(new URL(tab.url).origin!==workbench.origin||!await allowedOrigin(tab.url))return {ok:false,task:null,connectURL,error:'原工作台已离开或未授权，请重新选择查询账户'};
-    let response;try{response=await chrome.tabs.sendMessage(tab.id,{type:'GET_PURCHASE_OFFER',origin:workbench.origin,account,productId:id,gifts},{frameId:0})}catch{return {ok:false,task:null,connectURL,error:'工作台连接失效，请刷新工作台并重新选择账户'}}
+   if(task?.offerId!==id||task?.direct){
+    const {workbenchOrigin:connectURL}=await chrome.storage.local.get('workbenchOrigin');
+    if(!connectURL)return {ok:true,task:null,reason:'请点击采购助手图标，保存并授权后台地址。'};
+    await chrome.storage.session.remove(key);
+    const tab=await workbenchTab(connectURL);
+    const workbench={tabId:tab.id,origin:connectURL};
+    const settings=await chrome.tabs.sendMessage(tab.id,{type:'GET_PLUGIN_QUERY_SETTINGS',origin:connectURL},{frameId:0});
+    if(!settings?.ok)throw Error(settings?.error||'读取后台插件设置失败');
+    const {account,gifts}=settings.result;
+    if(!/^[1-9][0-9]*$/.test(account))return {ok:true,task:null,connectURL,reason:'请在后台账户管理中添加查询账户。'};
+    const response=await chrome.tabs.sendMessage(tab.id,{type:'GET_PURCHASE_OFFER',origin:connectURL,account,gifts,productId:id},{frameId:0});
     if(!response?.ok)return {ok:false,task:null,connectURL,error:response?.error||'查询失败'};
     if(!response.result.found){await chrome.storage.session.remove(key);return {ok:true,task:null,connectURL,reason:`账户 #${account}（${gifts?'包含':'不含'}赠品）的采购缓存中没有此货源的待采购商品。缓存时间：${new Date(response.result.createdAt).toLocaleString()}。需要更新时在工作台点击刷新采购汇总。`}};
     const p=snapshot(response.result.snapshot);if(p.account!==account||p.offerId!==id)throw Error('返回清单账户或货源不一致');

@@ -31,6 +31,36 @@ func NewWithRuntime(db *sql.DB, dir string, runtime browser.Runtime, publicOrigi
 }
 func NewWithRuntimeContext(ctx context.Context, db *sql.DB, dir string, runtime browser.Runtime, publicOrigin string) http.Handler {
 	mux := http.NewServeMux()
+	type pluginSettings struct {
+		Account string `json:"account"`
+		Gifts   bool   `json:"gifts"`
+	}
+	mux.HandleFunc("GET /api/plugin-query-settings", func(w http.ResponseWriter, r *http.Request) {
+		var settings pluginSettings
+		err := db.QueryRow(`SELECT a.id, COALESCE(s.include_gifts,0) FROM accounts a
+            LEFT JOIN plugin_query_settings s ON s.account_id=a.id
+            ORDER BY (s.id IS NULL), a.id LIMIT 1`).Scan(&settings.Account, &settings.Gifts)
+		if err != nil && err != sql.ErrNoRows {
+			send(w, 500, map[string]string{"error": "插件设置读取失败"})
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		send(w, 200, settings)
+	})
+	mux.HandleFunc("PUT /api/plugin-query-settings", func(w http.ResponseWriter, r *http.Request) {
+		var settings pluginSettings
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&settings) != nil || store.StorageKey(db, settings.Account) == "" {
+			send(w, 400, map[string]string{"error": "请选择有效账户"})
+			return
+		}
+		_, err := db.Exec(`INSERT INTO plugin_query_settings(id,account_id,include_gifts) VALUES(1,?,?)
+            ON CONFLICT(id) DO UPDATE SET account_id=excluded.account_id,include_gifts=excluded.include_gifts`, settings.Account, settings.Gifts)
+		if err != nil {
+			send(w, 500, map[string]string{"error": "插件设置保存失败"})
+			return
+		}
+		send(w, 200, settings)
+	})
 	mux.HandleFunc("GET /api/accounts", func(w http.ResponseWriter, r *http.Request) {
 		a, e := store.Accounts(db)
 		if e != nil {
@@ -67,6 +97,7 @@ func NewWithRuntimeContext(ctx context.Context, db *sql.DB, dir string, runtime 
 	mux.HandleFunc("GET /api/accounts/{id}/packages/{package}/amount-detail", g.amountDetail)
 	mux.HandleFunc("GET /desktop/{id}/{path...}", g.desktop)
 	mux.HandleFunc("POST /api/accounts/{id}/login", proxy("login"))
+	mux.HandleFunc("POST /api/accounts/{id}/restart-container", proxy("restart-container"))
 	mux.HandleFunc("POST /api/accounts/{id}/close", proxy("close"))
 	mux.HandleFunc("GET /api/accounts/{id}/status", proxy("status"))
 	mux.HandleFunc("POST /api/accounts/{id}/sync", proxy("sync"))

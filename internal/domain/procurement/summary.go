@@ -125,12 +125,14 @@ func Summarize(packages []orders.Fields, gifts bool) orders.Fields {
 			}
 			// Images belong to this specification, never to the group's first SKU.
 			images, _ := v["images"].([]string)
+			lineImage := orders.Fields{}
 			for _, field := range []string{"picUrlThumb", "picUrl", "originalPicUrl"} {
 				image := orders.Text(i[field])
 				u, err := url.Parse(image)
 				if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 					continue
 				}
+				lineImage[field] = image
 				found := false
 				for _, existing := range images {
 					if existing == image {
@@ -150,7 +152,7 @@ func Summarize(packages []orders.Fields, gifts bool) orders.Fields {
 				"packageId": p["opOrderPackageId"], "itemId": i["opOrderItemId"], "packageNo": p["appPackageNo"],
 				"orderNo": p["platformOrderSn"], "localNote": localNote(p),
 				"orderedAt": orderedAt, "paidAt": paidAt, "paymentMethod": orders.Text(orderInfo["paymentMethod"]),
-				"shopId": shop, "productId": i["platformItemId"], "skuId": i["platformSkuId"], "originalSpec": i["skuSubName"], "quantity": q, "gift": gift,
+				"shopId": shop, "productId": i["platformItemId"], "skuId": i["platformSkuId"], "originalSpec": i["skuSubName"], "image": lineImage, "quantity": q, "gift": gift,
 			})
 			g["quantity"] = g["quantity"].(int64) + q
 			total += q

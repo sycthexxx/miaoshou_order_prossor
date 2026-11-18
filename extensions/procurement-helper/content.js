@@ -11,7 +11,7 @@
  `;shadow.append(style);
  const make=(tag,cls,text)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el};
  const bubble=make('button','bubble','采购清单'),panel=make('section','panel');bubble.title='拖动移动，点击展开采购清单';bubble.setAttribute('aria-expanded','false');panel.hidden=true;
- const head=make('div','head','待采购商品 · 0.1.11'),close=make('button','plain','收起');head.append(close);
+ const head=make('div','head','待采购商品 · 0.1.12'),close=make('button','plain','收起');head.append(close);
  const body=make('div','body'),footer=make('div','footer'),summary=make('span','','等待核对'),rescan=make('button','','重新核对'),resetAll=make('button','','清除核对');footer.append(summary,rescan,resetAll);panel.append(head,body,footer);shadow.append(bubble,panel);
  let dragged=false,expanded=false;
  function clamp(){const r=host.getBoundingClientRect();host.style.left=Math.max(8,Math.min(r.left,innerWidth-r.width-8))+'px';host.style.top=Math.max(8,Math.min(r.top,innerHeight-r.height-8))+'px';host.style.right='auto'}
@@ -26,12 +26,12 @@
  const saved=await chrome.storage.local.get(['position',bindingKey]);
  const legacyBindings=saved[bindingKey],selectors={};let mappingState=OPMappings.empty(),bindings={};
  if(saved.position){host.style.left=saved.position.left+'px';host.style.top=saved.position.top+'px';host.style.right='auto';clamp()}
- const connectionTools=make('div','tools'),retryLookup=make('button','','连接工作台并查询'),changeContext=make('a','','切换查询账户');
- if(answer?.connectURL){changeContext.href=answer.connectURL+'/#/procurement';changeContext.target='_blank';changeContext.rel='noopener noreferrer';connectionTools.append(changeContext)}
- retryLookup.onclick=async()=>{retryLookup.disabled=true;retryLookup.textContent='正在查询…';try{const r=await chrome.runtime.sendMessage({type:'GET_PROCUREMENT',reload:true,connect:true});if(!r?.ok)throw Error(r?.error||'查询失败');location.reload()}catch(e){retryLookup.textContent=e.message;retryLookup.disabled=false}};
+ const connectionTools=make('div','tools'),retryLookup=make('button','','连接工作台并查询'),changeContext=make('a','','账户管理');
+ if(answer?.connectURL){changeContext.href=answer.connectURL+'/#/accounts';changeContext.target='_blank';changeContext.rel='noopener noreferrer';connectionTools.append(changeContext)}
+ retryLookup.onclick=()=>location.reload();
  if(!task||task.direct)connectionTools.append(retryLookup);
  body.append(connectionTools);
- if(!task){body.append(make('p','title','直接打开货源查询'),make('p','notice',answer?.error||answer?.reason||'请从采购汇总重新打开货源'),make('p','note','在这台电脑打开公司工作台，再点击采购助手图标，保存并授权工作台实际地址（不是员工电脑的 localhost）。回到工作台确认“采购助手已连接”。'));summary.textContent='按所选账户查询采购缓存';toggle(true);return}
+ if(!task){body.append(make('p','title','直接打开货源查询'),make('p','notice',answer?.error||answer?.reason||'请从采购汇总重新打开货源'));summary.textContent='按所选账户查询采购缓存';toggle(true);return}
  const requiredQuantity=task.variants.reduce((sum,v)=>sum+v.quantity,0);
  if(task.direct)body.append(make('p','meta',`直接查询 · ${answer.connectURL} · ${task.gifts?'包含':'不含'}赠品`));
  body.append(make('p','title',task.title),make('p','meta',`货源 ${task.offerId} · 账户 #${task.account} · ${new Date(task.createdAt).toLocaleString()}`));
