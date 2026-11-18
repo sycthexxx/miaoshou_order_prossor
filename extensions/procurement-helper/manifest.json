@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "内部采购助手",
+  "version": "0.1.11",
+  "description": "从订单工作台带入货源采购需求，人工选规格时核对数量。不会自动下单。",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "storage",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "https://detail.1688.com/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "设置采购工作台地址",
+    "default_popup": "options.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://detail.1688.com/offer/*"
+      ],
+      "js": [
+        "core.js",
+        "mappings.js",
+        "adapter.js",
+        "supplier.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

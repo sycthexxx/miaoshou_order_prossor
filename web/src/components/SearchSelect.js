@@ -1,0 +1,12 @@
+import {computed,ref,nextTick,watch,onMounted,onUnmounted} from 'vue/dist/vue.esm-bundler.js';
+export default {props:{modelValue:[String,Number],options:{type:Array,default:()=>[]},disabled:Boolean,label:{type:String,default:'选择选项'},placeholder:{type:String,default:'尚未指定'}},emits:['change'],setup(props,{emit}){
+ const root=ref(null),search=ref(null),query=ref(''),open=ref(false);
+ const selected=computed(()=>props.options.find(o=>String(o.value)===String(props.modelValue))?.label||props.placeholder);
+ const filtered=computed(()=>props.options.filter(o=>o.label.toLowerCase().includes(query.value.trim().toLowerCase())));
+ function close(){if(root.value)root.value.open=false;open.value=false}
+ async function toggle(){open.value=!!root.value?.open;if(open.value){query.value='';await nextTick();search.value?.focus()}}
+ function choose(value){if(props.disabled)return;close();emit('change',value);root.value?.querySelector('summary')?.focus()}
+ function outside(e){if(open.value&&!root.value?.contains(e.target))close()}
+ watch(()=>props.disabled,v=>{if(v)close()});onMounted(()=>document.addEventListener('pointerdown',outside));onUnmounted(()=>document.removeEventListener('pointerdown',outside));
+ return{root,search,query,open,selected,filtered,toggle,close,choose};
+},template:`<details ref="root" class="search-select" :class="{disabled}" @toggle="toggle" @keydown.esc.stop.prevent="close" @focusout="e=>{if(!e.currentTarget.contains(e.relatedTarget))close()}"><summary :aria-label="label+': '+selected" :aria-disabled="disabled" :tabindex="disabled?-1:0" @click="e=>{if(disabled)e.preventDefault()}">{{selected}}<span aria-hidden="true">⌄</span></summary><div v-if="open" class="search-select-menu"><input ref="search" v-model="query" type="search" placeholder="输入名称搜索…" :aria-label="'搜索'+label" @keydown.enter.prevent="filtered.length===1&&choose(filtered[0].value)"><div class="search-select-options"><button type="button" :class="{chosen:!modelValue}" @click="choose(0)">{{placeholder}}<span v-if="!modelValue">✓</span></button><button v-for="o in filtered" :key="o.value" type="button" :class="{chosen:String(o.value)===String(modelValue)}" @click="choose(o.value)">{{o.label}}<span v-if="String(o.value)===String(modelValue)">✓</span></button><p v-if="!filtered.length" class="select-no-results">没有匹配的选项</p></div><div class="select-count">{{filtered.length}} 个可选卖家</div></div></details>`};

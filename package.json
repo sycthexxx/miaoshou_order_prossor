@@ -1,0 +1,21 @@
+{
+  "name": "order-processor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "start": "go run .",
+    "check": "node --check internal/adapters/miaoshou/web/worker/worker.mjs",
+    "test:extension": "node --test tests/extension/*.test.mjs",
+    "start:remote": "bash scripts/start-remote.sh",
+    "start:local": "ORDER_BROWSER_MODE=local go run ."
+  },
+  "dependencies": {
+    "playwright": "1.63.0",
+    "vue": "3.5.43"
+  },
+  "devDependencies": {
+    "vite": "7.3.7"
+  }
+}
