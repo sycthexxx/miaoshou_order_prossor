@@ -19,13 +19,19 @@ type browserGate struct {
 	sync.Mutex
 	desktop bool
 }
+type accountBrowserRuntime interface {
+	browser.Runtime
+	Restart(context.Context, string) (browser.Target, error)
+	Stop(context.Context, string) error
+}
+
 type browserGateway struct {
-	db            *sql.DB
-	runtime       browser.Runtime
-	client        *http.Client
-	gates         sync.Map
-	syncingOrders func(string) bool
-	packingMu     sync.Mutex
+	db      *sql.DB
+	runtime accountBrowserRuntime
+	client  *http.Client
+	gates   sync.Map
+
+	packingMu sync.Mutex
 }
 
 func (g *browserGateway) gate(id string) *browserGate {
@@ -75,19 +81,8 @@ func (g *browserGateway) action(action string) http.HandlerFunc {
 		defer cancel()
 		key := store.StorageKey(g.db, id)
 		target, e := g.runtime.Resolve(ctx, key, action == "login")
-		mode := "local"
-		if g.runtime.Remote() {
-			mode = "docker"
-		}
 		workerAction := action
 		if restart {
-			runtime, ok := g.runtime.(interface {
-				Restart(context.Context, string) (browser.Target, error)
-			})
-			if !ok {
-				send(w, 409, map[string]string{"error": "仅容器模式支持重启"})
-				return
-			}
 			if e == nil {
 				probe, done := context.WithTimeout(ctx, 2*time.Second)
 				_, state, _ := g.call(probe, target, key, "GET", "status")
@@ -98,28 +93,28 @@ func (g *browserGateway) action(action string) http.HandlerFunc {
 					return
 				}
 			}
-			target, e = runtime.Restart(ctx, key)
+			target, e = g.runtime.Restart(ctx, key)
 			workerAction = "login"
 		}
 		if errors.Is(e, browser.ErrNotStarted) && action == "status" {
-			send(w, 200, map[string]any{"state": "closed", "browserMode": mode})
+			send(w, 200, map[string]any{"state": "closed", "browserMode": "docker"})
 			return
 		}
 		if e != nil {
 			message, code := browserRuntimeError(e)
-			send(w, 503, map[string]string{"error": message, "errorCode": code, "browserMode": mode})
+			send(w, 503, map[string]string{"error": message, "errorCode": code, "browserMode": "docker"})
 			return
 		}
 		status, data, e := g.call(ctx, target, key, r.Method, workerAction)
 		if restart && (e != nil || status != 200 || data["state"] == "closed" || data == nil) {
-			send(w, 503, map[string]string{"error": "容器已重启，浏览器未打开，请点击「打开远程浏览器」重试", "browserMode": mode})
+			send(w, 503, map[string]string{"error": "容器已重启，浏览器未打开，请点击「打开远程浏览器」重试", "browserMode": "docker"})
 			return
 		}
 		if e != nil {
-			send(w, 503, map[string]string{"error": "浏览器服务暂不可用，请查看启动终端", "errorCode": "worker_unavailable", "browserMode": mode})
+			send(w, 503, map[string]string{"error": "浏览器服务暂不可用，请查看启动终端", "errorCode": "worker_unavailable", "browserMode": "docker"})
 			return
 		}
-		data["browserMode"] = mode
+		data["browserMode"] = "docker"
 		if target.Desktop != nil {
 			data["desktopURL"] = "/desktop/" + id + "/vnc.html?autoconnect=1&resize=scale&path=desktop/" + id + "/websockify"
 		}
@@ -128,7 +123,7 @@ func (g *browserGateway) action(action string) http.HandlerFunc {
 }
 func (g *browserGateway) desktop(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !g.runtime.Remote() || !store.Exists(g.db, id) {
+	if !store.Exists(g.db, id) {
 		http.NotFound(w, r)
 		return
 	}

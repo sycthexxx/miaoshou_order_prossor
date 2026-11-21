@@ -8,7 +8,7 @@ import (
 	"order_processor/internal/store"
 )
 
-func supplierRoutes(mux *http.ServeMux, db *sql.DB) {
+func supplierRoutes(mux *http.ServeMux, db *sql.DB, caches ...*procurementCache) {
 	mux.HandleFunc("POST /api/accounts/{id}/source-supplier/capture", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if !store.Exists(db, id) {
@@ -25,12 +25,17 @@ func supplierRoutes(mux *http.ServeMux, db *sql.DB) {
 		}
 		result, e := store.CaptureSupplier(db, currentUser(r).ID, id, in.ProductID, in.Name)
 		if e != nil {
-			status := http.StatusBadRequest
-			if errors.Is(e, store.ErrSupplierBusy) {
-				status = http.StatusConflict
-			}
-			send(w, status, map[string]string{"error": e.Error()})
+			send(w, http.StatusBadRequest, map[string]string{"error": e.Error()})
 			return
+		}
+		if result["assigned"].(int64)+result["updated"].(int64) > 0 && len(caches) > 0 {
+			result["cacheRefreshed"] = true
+			if err := caches[0].refreshAccount(id); err != nil {
+				// Association committed successfully; a retry would not fix a
+				// failed summary query, so preserve the successful result.
+				result["cacheRefreshed"] = false
+				result["cacheRefreshError"] = "厂家关联已保存，但采购汇总更新失败，请手动刷新采购汇总"
+			}
 		}
 		send(w, 200, result)
 	})

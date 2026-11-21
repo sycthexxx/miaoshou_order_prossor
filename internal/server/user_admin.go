@@ -81,7 +81,7 @@ func (g *browserGateway) removeAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer gate.Unlock()
-	if gate.desktop || g.syncingOrders != nil && g.syncingOrders(id) {
+	if gate.desktop {
 		send(w, 409, map[string]string{"error": "请先关闭远程桌面并结束订单同步"})
 		return
 	}
@@ -113,14 +113,10 @@ func (g *browserGateway) removeAccount(w http.ResponseWriter, r *http.Request) {
 			send(w, code, reply)
 			return
 		}
-		if runtime, ok := g.runtime.(interface {
-			Stop(context.Context, string) error
-		}); ok {
-			if err = runtime.Stop(ctx, key); err != nil {
-				message, _ := browserRuntimeError(err)
-				send(w, 503, map[string]string{"error": message})
-				return
-			}
+		if err = g.runtime.Stop(ctx, key); err != nil {
+			message, _ := browserRuntimeError(err)
+			send(w, 503, map[string]string{"error": message})
+			return
 		}
 	} else if !errors.Is(err, browser.ErrNotStarted) {
 		message, _ := browserRuntimeError(err)

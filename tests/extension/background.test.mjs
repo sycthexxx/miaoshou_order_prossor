@@ -80,3 +80,12 @@ test('direct lookup reads current server settings and automatically reopens a cl
  assert.equal(relays.at(-1).id,tab.id);
  assert.equal(relays.at(-1).data.gifts,false);
 });
+
+test('source status relay retains original account and offer while leaving supplier/mapping paths independent',async()=>{
+ configured='http://192.168.1.104:17381';const sender=opening(configured+'/#/procurement');
+ await call({type:'OPEN_PROCUREMENT',payload},sender);const offer=nextID;
+ relayResult={ok:true,result:{sourceStatus:{state:'invalid',source:'manual'},retainedManual:true}};
+ const r=await call({type:'REPORT_SOURCE_STATUS',state:'valid',reason:'可购买',account:'999',productId:'200'},offerSender(offer));
+ assert.equal(r.result.retainedManual,true);assert.equal(relays.at(-1).data.type,'SAVE_SOURCE_STATUS');assert.equal(relays.at(-1).data.account,payload.account);assert.equal(relays.at(-1).data.productId,'100');
+ const before=relays.length;assert.equal((await call({type:'REPORT_SOURCE_STATUS',state:'valid'},{...offerSender(offer),url:'https://detail.1688.com/offer/200.html'})).ok,false);assert.equal(relays.length,before);
+});

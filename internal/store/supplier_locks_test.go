@@ -93,7 +93,7 @@ func TestConcurrentSupplierPurchasers(t *testing.T) {
 	}
 }
 
-func TestPluginWritesRespectSupplierLease(t *testing.T) {
+func TestMappingAndManualAssignmentRespectSupplierLease(t *testing.T) {
 	db, account, _ := captureFixture(t)
 	captureProduct(t, db, account, "100", "CN", "HK")
 	captureProduct(t, db, account, "200", "CN")
@@ -105,12 +105,6 @@ func TestPluginWritesRespectSupplierLease(t *testing.T) {
 	_, err = AcquireSupplier(context.Background(), db, account, SupplierLease{Supplier: supplier, UserID: 1, Username: "采购甲"})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if _, err = CaptureSupplier(db, 2, account, "100", "新厂家"); !errors.Is(err, ErrSupplierBusy) {
-		t.Fatal("source reassigned", err)
-	}
-	if _, err = CaptureSupplier(db, 2, account, "200", "已占用厂家"); !errors.Is(err, ErrSupplierBusy) {
-		t.Fatal("target reassigned", err)
 	}
 	if err = AssignSupplier(db, 2, account, "1688", "CN", "100", 0); !errors.Is(err, ErrSupplierBusy) {
 		t.Fatal("source cleared", err)
@@ -157,5 +151,73 @@ func TestRestartClearsSupplierPurchases(t *testing.T) {
 	var tables int
 	if err = db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='supplier_leases'").Scan(&tables); err != nil || tables != 0 {
 		t.Fatal("legacy lease table still present", tables, err)
+	}
+}
+
+func TestSupplierCaptureDoesNotChangeProcurementState(t *testing.T) {
+	db, account, _ := captureFixture(t)
+	for _, id := range []string{"100", "200", "300", "400"} {
+		captureProduct(t, db, account, id, "CN")
+	}
+	old, err := CaptureSupplier(db, 1, account, "100", "采购中的原厂家")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = CaptureSupplier(db, 1, account, "200", "采购中的原厂家"); err != nil {
+		t.Fatal(err)
+	}
+	target, err := CaptureSupplier(db, 1, account, "300", "采购中的目标厂家")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldID, targetID := old["supplierId"].(int64), target["supplierId"].(int64)
+	for _, id := range []int64{oldID, targetID} {
+		if _, err = AcquireSupplier(context.Background(), db, account, SupplierLease{Supplier: id, UserID: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := SupplierLeases(context.Background(), db, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`UPDATE source_suppliers SET updated_at='unchanged-time' WHERE product_id='100'`); err != nil {
+		t.Fatal(err)
+	}
+	same, err := CaptureSupplier(db, 2, account, "100", "  采购中的原厂家 ")
+	if err != nil || same["retained"] != 1 {
+		t.Fatal(same, err)
+	}
+	var at string
+	db.QueryRow(`SELECT updated_at FROM source_suppliers WHERE product_id='100'`).Scan(&at)
+	if at != "unchanged-time" {
+		t.Fatal(at)
+	}
+	changed, err := CaptureSupplier(db, 2, account, "100", "采购中的目标厂家")
+	if err != nil || changed["updated"] != int64(1) || changed["supplierId"] != targetID {
+		t.Fatal(changed, err)
+	}
+	assigned, err := CaptureSupplier(db, 2, account, "400", "采购中的原厂家")
+	if err != nil || assigned["assigned"] != int64(1) || assigned["supplierId"] != oldID {
+		t.Fatal(assigned, err)
+	}
+	var unaffected int64
+	db.QueryRow(`SELECT supplier_id FROM source_suppliers WHERE product_id='200'`).Scan(&unaffected)
+	if unaffected != oldID {
+		t.Fatal("other product changed", unaffected)
+	}
+	after, err := SupplierLeases(context.Background(), db, account)
+	if err != nil || len(after) != len(before) {
+		t.Fatal(after, err)
+	}
+	for _, expected := range before {
+		found := false
+		for _, actual := range after {
+			if actual == expected {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("procurement state changed", expected, after)
+		}
 	}
 }

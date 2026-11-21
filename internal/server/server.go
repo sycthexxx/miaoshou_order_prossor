@@ -4,9 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"order_processor/internal/adapters/miaoshou/web/browser"
 	"order_processor/internal/store"
 	"os"
 	"path/filepath"
@@ -15,21 +13,12 @@ import (
 	"time"
 )
 
-func WorkerEnv(port int, token, dir string) []string {
-	return []string{fmt.Sprintf("BROWSER_PORT=%d", port), "BROWSER_TOKEN=" + token, "ORDER_DATA_DIR=" + dir}
-}
 func send(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
 }
-func New(db *sql.DB, dir string, port int, token string) http.Handler {
-	return NewWithRuntime(db, dir, browser.Local{Port: port, Token: token}, "")
-}
-func NewWithRuntime(db *sql.DB, dir string, runtime browser.Runtime, publicOrigin string) http.Handler {
-	return NewWithRuntimeContext(nil, db, dir, runtime, publicOrigin)
-}
-func NewWithRuntimeContext(ctx context.Context, db *sql.DB, dir string, runtime browser.Runtime, publicOrigin string) http.Handler {
+func NewWithRuntimeContext(ctx context.Context, db *sql.DB, dir string, runtime accountBrowserRuntime, publicOrigin string) http.Handler {
 	mux := http.NewServeMux()
 	type pluginSettings struct {
 		Account string `json:"account"`
@@ -127,9 +116,10 @@ func NewWithRuntimeContext(ctx context.Context, db *sql.DB, dir string, runtime 
 	mux.HandleFunc("POST /api/accounts/{id}/sync-pending", proxy("sync-pending"))
 	mux.HandleFunc("POST /api/accounts/{id}/stop-sync", proxy("stop-sync"))
 	cache := procurementRoutes(mux, db)
-	openAPIRoutes(mux, db, dir, cache, g)
-	apiCredentialRoutes(mux, db)
-	supplierRoutes(mux, db)
+	notifications := &orderEventNotifications{}
+	orderEventRoutes(ctx, mux, db, dir, cache, notifications)
+	sourceStatusRoutes(mux, db, cache)
+	supplierRoutes(mux, db, cache)
 	mux.HandleFunc("GET /api/accounts/{id}/archives", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if !store.Exists(db, id) {
@@ -182,5 +172,7 @@ func NewWithRuntimeContext(ctx context.Context, db *sql.DB, dir string, runtime 
 	})
 	mux.Handle("/", http.FileServer(http.Dir("dist")))
 	auth := &authentication{db: db, sessions: map[string]loginSession{}}
+	mux.HandleFunc("GET /api/accounts/{id}/procurement/ws", cache.stream(auth))
+	mux.HandleFunc("GET /api/accounts/{id}/order-events/ws", notifications.stream(db, auth))
 	return requestBoundary(auth.protect(mux), publicOrigin)
 }

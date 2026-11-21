@@ -62,7 +62,7 @@
   if(result.assigned)changes.push(`新增 ${result.assigned} 条货源关联`);
   if(result.updated)changes.push(`已更新 ${result.updated} 条货源厂家关联`);
   if(result.retained)changes.push(`${result.retained} 条同名关联保持不变`);
-  return changes.join('；')+'。';
+  return changes.join('；')+'。'+(result.cacheRefreshed===false?' 厂家已保存，汇总刷新失败，请在工作台刷新采购汇总。':'');
  }
  globalThis.OPSupplier={cleanName,supplierNames,supplierReading,supplierResultText};
 })();

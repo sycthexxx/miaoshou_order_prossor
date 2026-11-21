@@ -149,7 +149,7 @@ func AssignSupplier(db *sql.DB, userID int64, account, source, site, product str
 	return tx.Commit()
 }
 
-func attachSuppliers(db *sql.DB, account string, report object) error {
+func attachSuppliers(db rowsQuerier, account string, report object) error {
 	rows, e := db.Query(`SELECT m.source,m.site,m.product_id,s.id,s.name,s.platform FROM source_suppliers m JOIN suppliers s ON s.id=m.supplier_id AND s.account_id=m.account_id WHERE m.account_id=?`, account)
 	if e != nil {
 		return e

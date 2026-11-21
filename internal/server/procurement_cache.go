@@ -16,8 +16,10 @@ type procurementCacheKey struct {
 	gifts   bool
 }
 type procurementCacheEntry struct {
-	mu   sync.Mutex
-	data map[string]any
+	mu          sync.Mutex
+	data        map[string]any
+	revision    int64
+	subscribers map[chan map[string]any]struct{}
 }
 type procurementCache struct {
 	mu      sync.Mutex
@@ -48,8 +50,15 @@ func (c *procurementCache) get(account string, gifts, refresh bool) (map[string]
 	if err != nil {
 		return nil, err
 	}
-	data["createdAt"] = time.Now().UnixMilli()
+	at := time.Now().UnixMilli()
+	data["createdAt"] = at
+	if at <= entry.revision {
+		at = entry.revision + 1
+	}
+	entry.revision = at
+	data["revision"] = at
 	entry.data = data
+	entry.publishLocked(data)
 	return data, nil
 }
 
@@ -74,10 +83,14 @@ func sourceOfferID(group map[string]any) string {
 func summaryOfferSnapshot(data map[string]any, account, offer string) (map[string]any, bool) {
 	variants := map[string]map[string]any{}
 	title := ""
+	var sourceStatus any = map[string]any{"state": "unknown", "reason": "", "checkedAt": "", "source": ""}
 	groups, _ := data["groups"].([]map[string]any)
 	for _, g := range groups {
 		if reason, _ := g["reason"].(string); reason != "" || sourceOfferID(g) != offer {
 			continue
+		}
+		if status, ok := g["sourceStatus"]; ok {
+			sourceStatus = status
 		}
 		if title == "" {
 			title, _ = g["title"].(string)
@@ -138,21 +151,70 @@ func summaryOfferSnapshot(data map[string]any, account, offer string) (map[strin
 	}
 	// Deliberately construct a narrow DTO: no order lines, buyer fields, supplier
 	// assignments, or original product payload crosses into the extension.
-	return map[string]any{"version": 1, "offerId": offer, "url": "https://detail.1688.com/offer/" + offer + ".html", "account": account, "title": title, "createdAt": data["createdAt"], "variants": out}, true
+	return map[string]any{"version": 1, "offerId": offer, "url": "https://detail.1688.com/offer/" + offer + ".html", "account": account, "title": title, "createdAt": data["createdAt"], "variants": out, "sourceStatus": sourceStatus}, true
 }
 
-func (c *procurementCache) invalidate(account string) {
+// Only immutable complete snapshots enter these queues. Slow consumers retain
+// the latest version; no network IO runs while cache locks are held.
+func (e *procurementCacheEntry) publishLocked(data map[string]any) {
+	for ch := range e.subscribers {
+		select {
+		case ch <- data:
+		default:
+			select {
+			case <-ch:
+			default:
+			}
+			ch <- data
+		}
+	}
+}
+func (c *procurementCache) subscribe(account string, gifts bool) (<-chan map[string]any, func(), error) {
+	if _, err := c.get(account, gifts, false); err != nil {
+		return nil, nil, err
+	}
 	c.mu.Lock()
-	entries := []*procurementCacheEntry{}
-	for key, entry := range c.entries {
+	e := c.entries[procurementCacheKey{account, gifts}]
+	c.mu.Unlock()
+	e.mu.Lock()
+	// Invalidation may happen between the first get and registration. Register
+	// first and regenerate below if necessary, so no refresh can be missed.
+	if e.subscribers == nil {
+		e.subscribers = map[chan map[string]any]struct{}{}
+	}
+	ch := make(chan map[string]any, 1)
+	e.subscribers[ch] = struct{}{}
+	data := e.data
+	if data != nil {
+		ch <- data
+	}
+	e.mu.Unlock()
+	cancel := func() { e.mu.Lock(); delete(e.subscribers, ch); e.mu.Unlock() }
+	if data == nil {
+		if _, err := c.get(account, gifts, false); err != nil {
+			cancel()
+			return nil, nil, err
+		}
+	}
+	return ch, cancel, nil
+}
+func (c *procurementCache) refreshAccount(account string) error {
+	c.mu.Lock()
+	keys := []procurementCacheKey{}
+	for key := range c.entries {
 		if key.account == account {
-			entries = append(entries, entry)
+			keys = append(keys, key)
 		}
 	}
 	c.mu.Unlock()
-	for _, entry := range entries {
-		entry.mu.Lock()
-		entry.data = nil
-		entry.mu.Unlock()
+	if len(keys) == 0 {
+		keys = append(keys, procurementCacheKey{account: account})
 	}
+	var first error
+	for _, key := range keys {
+		if _, err := c.get(key.account, key.gifts, true); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }

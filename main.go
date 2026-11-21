@@ -2,10 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"order_processor/internal/adapters/miaoshou/web"
@@ -13,7 +10,6 @@ import (
 	"order_processor/internal/server"
 	"order_processor/internal/store"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -31,11 +27,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	mode := env("ORDER_BROWSER_MODE", "docker")
 	publicOrigin := strings.TrimRight(os.Getenv("ORDER_PUBLIC_ORIGIN"), "/")
-	if mode != "local" && mode != "docker" {
-		log.Fatal("ORDER_BROWSER_MODE 必须为 local 或 docker")
-	}
 	if publicOrigin != "" {
 		u, e := url.Parse(publicOrigin)
 		if e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
@@ -44,8 +36,6 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	var runtime browser.Runtime
-	var worker *exec.Cmd
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		log.Fatal(err)
 	}
@@ -54,37 +44,12 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
-	if mode == "docker" {
-		remote := &browser.Docker{DataDir: dir, Image: env("ORDER_BROWSER_IMAGE", "order-processor-browser:1.63.0"), Prefix: env("ORDER_BROWSER_PREFIX", "op-browser-")}
-		checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		checkErr := remote.Check(checkCtx)
-		cancel()
-		if checkErr != nil {
-			log.Fatal(checkErr)
-		}
-		runtime = remote
-	} else {
-		secret := make([]byte, 32)
-		if _, err = rand.Read(secret); err != nil {
-			log.Fatal(err)
-		}
-		token := hex.EncodeToString(secret)
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			log.Fatal(err)
-		}
-		port := listener.Addr().(*net.TCPAddr).Port
-		listener.Close()
-		worker = exec.CommandContext(ctx, "node", "internal/adapters/miaoshou/web/worker/worker.mjs")
-		worker.Env = append(os.Environ(), server.WorkerEnv(port, token, dir)...)
-		worker.Cancel = func() error { return worker.Process.Signal(syscall.SIGTERM) }
-		worker.WaitDelay = 8 * time.Second
-		worker.Stdout = os.Stdout
-		worker.Stderr = os.Stderr
-		if err = worker.Start(); err != nil {
-			log.Fatal(err)
-		}
-		runtime = browser.Local{Port: port, Token: token}
+	runtime := &browser.Docker{DataDir: dir, Image: env("ORDER_BROWSER_IMAGE", "order-processor-browser:1.63.0"), Prefix: env("ORDER_BROWSER_PREFIX", "op-browser-")}
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	checkErr := runtime.Check(checkCtx)
+	cancel()
+	if checkErr != nil {
+		log.Fatal(checkErr)
 	}
 	if n, e := store.ReplayArchives(db, dir, web.Decoder{}); e != nil {
 		log.Printf("本地响应解析失败: %v", e)
@@ -106,14 +71,6 @@ func main() {
 		}
 	}()
 	api := server.NewWithRuntimeContext(ctx, db, dir, runtime, publicOrigin)
-	if worker != nil {
-		go func() {
-			if e := worker.Wait(); e != nil && ctx.Err() == nil {
-				log.Printf("浏览器服务退出: %v", e)
-				stop()
-			}
-		}()
-	}
 	srv := &http.Server{Addr: env("ORDER_LISTEN", "0.0.0.0:17381"), Handler: api, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -121,7 +78,7 @@ func main() {
 		defer cancel()
 		srv.Shutdown(c)
 	}()
-	log.Printf("工作台监听 %s，浏览器模式 %s（先运行 npm run build）", srv.Addr, mode)
+	log.Printf("工作台监听 %s，使用容器浏览器（先运行 npm run build）", srv.Addr)
 	if err = srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Print(err)
 		stop()

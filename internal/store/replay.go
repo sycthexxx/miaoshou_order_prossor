@@ -63,7 +63,7 @@ func importArchive(db *sql.DB, account, file string, archive orders.Archive) err
 		p, id := record.Fields, record.ID
 		switch archive.Kind {
 		case orders.Packages:
-			_, _, err = saveOrderRecord(context.Background(), tx, account, at, file, archive.Source, record, orders.ImportPolicy{})
+			err = saveOrderRecord(context.Background(), tx, account, at, file, archive.Source, record)
 		case orders.Products:
 			err = saveProduct(tx, account, at, file, p)
 		case orders.Outbound:

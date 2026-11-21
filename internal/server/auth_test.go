@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"order_processor/internal/adapters/miaoshou/web/browser"
 	"order_processor/internal/store"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,7 @@ func adminSession(t *testing.T, h http.Handler) *http.Cookie {
 // Existing route tests exercise the same authenticated middleware as the UI.
 func authenticatedTestServer(t *testing.T, db *sql.DB, dir string) http.Handler {
 	t.Helper()
-	h := New(db, dir, 1, "test")
+	h := NewWithRuntimeContext(nil, db, dir, &browser.Docker{}, "")
 	c := adminSession(t, h)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.AddCookie(c); h.ServeHTTP(w, r) })
 }
@@ -52,7 +53,7 @@ func TestAccountAccessFollowsCurrentGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(db, dir, 1, "test")
+	h := NewWithRuntimeContext(nil, db, dir, &browser.Docker{}, "")
 	for _, path := range []string{"/api/accounts", "/api/users", "/desktop/1/vnc.html", "/api/accounts/1/orders"} {
 		if w := authRequest(h, nil, "GET", path, ""); w.Code != 401 {
 			t.Fatal(path, w.Code)
@@ -76,7 +77,7 @@ func TestAccountAccessFollowsCurrentGrants(t *testing.T) {
 	if err = json.Unmarshal(w.Body.Bytes(), &accounts); err != nil || len(accounts) != 1 || accounts[0].ID != second {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	for _, path := range []string{"/api/users", "/api/accounts/" + first + "/orders", "/api/accounts/" + second + "/api-credentials", "/desktop/" + second + "/vnc.html", "/api/accounts/" + second + "/archives"} {
+	for _, path := range []string{"/api/users", "/api/accounts/" + first + "/orders", "/desktop/" + second + "/vnc.html", "/api/accounts/" + second + "/archives"} {
 		if w := authRequest(h, c, "GET", path, ""); w.Code != 403 {
 			t.Fatal(path, w.Code)
 		}

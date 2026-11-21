@@ -82,13 +82,18 @@ func TestPackingJobHTTPSourceSelectionAndSinglePackageWrites(t *testing.T) {
 	packingJobRoutes(nil, mux, g)
 	registerSupplierLocks(mux, db)
 	actor := loginUser{ID: 1, Username: "管理员"}
-	req := httptest.NewRequest("POST", "/api/accounts/"+account+"/supplier-locks/0", nil)
-	grant := httptest.NewRecorder()
-	mux.ServeHTTP(grant, req.WithContext(context.WithValue(req.Context(), userContextKey{}, actor)))
-	var lease store.SupplierLease
-	if grant.Code != 200 || json.Unmarshal(grant.Body.Bytes(), &lease) != nil || lease.ID == 0 {
-		t.Fatal(grant.Code, grant.Body.String())
+	acquire := func(supplier string) store.SupplierLease {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/accounts/"+account+"/supplier-locks/"+supplier, nil)
+		grant := httptest.NewRecorder()
+		mux.ServeHTTP(grant, req.WithContext(context.WithValue(req.Context(), userContextKey{}, actor)))
+		var lease store.SupplierLease
+		if grant.Code != 200 || json.Unmarshal(grant.Body.Bytes(), &lease) != nil || lease.ID == 0 {
+			t.Fatal(grant.Code, grant.Body.String())
+		}
+		return lease
 	}
+	lease := acquire("0")
 	body := `{"name":"batch","sourceKey":"source:[\"1688\",\"\",\"100\"]","intervalSeconds":5,"selections":[{"packageId":"1","itemId":"11"},{"packageId":"2","itemId":"21"}],"info":{"purchase":{"platform":"1688","orderNumber":"001","buyer":"buyer","seller":"seller"},"autoSyncAmount":true}}`
 	create := func(user loginUser) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
@@ -98,8 +103,36 @@ func TestPackingJobHTTPSourceSelectionAndSinglePackageWrites(t *testing.T) {
 		mux.ServeHTTP(w, req)
 		return w
 	}
+	if refused := create(actor); refused.Code != 409 || !strings.Contains(refused.Body.String(), "未指定厂家") {
+		t.Fatal("expected unassigned source to block submission", refused.Code, refused.Body.String())
+	}
+	supplier, err := db.Exec("INSERT INTO suppliers(account_id,name,platform) VALUES(?,'厂家','1688')", account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	supplierID, err := supplier.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec("INSERT INTO source_suppliers(account_id,source,site,product_id,supplier_id,updated_at) VALUES(?,'1688','','100',?,'2026')", account, supplierID); err != nil {
+		t.Fatal(err)
+	}
+	lease = acquire(fmt.Sprint(supplierID))
 	if refused := create(loginUser{ID: 2, Username: "另一用户"}); refused.Code != 409 {
 		t.Fatal("another user submitted with a copied lease", refused.Code)
+	}
+	if _, err := db.Exec(`INSERT INTO shop_products(account_id,platform,shop_id,platform_item_id,payload,captured_at,source_file)
+        VALUES(?,'tiktok','shop','other','{"sourceList":[{"source":"1688","sourceItemId":"200"}]}','2026','test')`, account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE packages SET payload=json_set(payload,'$.items[2].platformItemId','other') WHERE account_id=? AND package_id='1'`, account); err != nil {
+		t.Fatal(err)
+	}
+	if refused := create(actor); refused.Code != 409 || !strings.Contains(refused.Body.String(), "未指定厂家") {
+		t.Fatal("unassigned source outside selection should block", refused.Code, refused.Body.String())
+	}
+	if _, err := store.SetSourceStatus(db, account, "200", store.SourceStatusInput{State: "invalid", Source: "manual"}); err != nil {
+		t.Fatal(err)
 	}
 	w := create(actor)
 	if w.Code != 201 {

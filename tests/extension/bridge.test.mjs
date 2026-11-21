@@ -30,3 +30,22 @@ test('offer query reads chosen account cache without refresh and preserves cache
  const f=fixture(200,{found:false,createdAt:123});const r=await f.call({...message,type:'GET_PURCHASE_OFFER',gifts:true});
  assert.equal(r.result.createdAt,123);assert.equal(f.requests[0].url,'/api/accounts/7/procurement/offers/100?gifts=1');assert.equal(f.requests[0].options.method,'GET');assert.equal(f.requests[0].options.body,undefined);
 });
+
+test('supplier capture succeeds without acquiring, renewing or releasing a purchase lease',async()=>{
+ const f=fixture(200,{assigned:0,updated:1,retained:0,created:false,supplierName:'甲厂'});
+ const r=await f.call(message);
+ assert.equal(r.ok,true);assert.equal(r.result.updated,1);
+ assert.equal(f.requests.length,1);
+ const request=f.requests[0];
+ assert.equal(request.url,'/api/accounts/7/source-supplier/capture');
+ assert.equal(request.options.method,'POST');
+ assert.equal(request.options.headers['X-Supplier-Lease'],undefined);
+ assert.deepEqual(JSON.parse(request.options.body),{productId:'100',name:'甲厂'});
+});
+
+test('source status uses bound account and forces plugin source rather than manual override',async()=>{
+ const f=fixture(200,{sourceStatus:{state:'invalid',source:'manual'},retainedManual:true,changed:false});
+ const r=await f.call({...message,type:'SAVE_SOURCE_STATUS',state:'invalid',reason:'商品已下架',evidence:'offer_removed',source:'manual'});
+ assert.equal(r.result.retainedManual,true);assert.equal(f.requests[0].url,'/api/accounts/7/source-status/100');assert.equal(f.requests[0].options.method,'PUT');
+ assert.deepEqual(JSON.parse(f.requests[0].options.body),{state:'invalid',reason:'商品已下架',source:'plugin',evidence:'offer_removed'});
+});

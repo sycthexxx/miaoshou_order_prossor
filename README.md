@@ -1,6 +1,6 @@
 # 订单数据工作台
 
-公司内网部署的订单与采购工作台。支持网页采集和官方 API 两种数据接入方式，共用订单、出货分组、产品货源及采购汇总业务。
+公司内网部署的订单与采购工作台。通过各妙手账户的独立 Docker 浏览器采集订单、出货分组和产品货源。
 
 ## 启动
 
@@ -12,7 +12,7 @@ npm run build
 npm run start:remote
 ```
 
-打开 http://127.0.0.1:17381；其他电脑可通过 Mac 的 192.168 内网地址访问。默认使用账户独立容器，点击“打开远程浏览器”后通过“打开远程桌面”登录妙手，验证后关闭桌面标签页再同步。首次从原生 Chrome 切换到容器需要重新登录。详细步骤见 [部署说明](deploy/README.md)。本机 Chrome 调试使用 `npm run start:local`。
+打开 http://127.0.0.1:17381；其他电脑可通过 Mac 的 192.168 内网地址访问。默认使用账户独立容器，点击“打开远程浏览器”后通过“打开远程桌面”登录妙手，验证后关闭桌面标签页再同步。首次从原生 Chrome 切换到容器需要重新登录。详细步骤见 [部署说明](deploy/README.md)。
 
 开发前端可另运行 `npm run dev`，访问 Vite 显示的本地地址。
 
@@ -58,7 +58,7 @@ npm run build
 
 ## 网页请求环境
 
-网页通道使用每账户专用 Chrome 的真实会话。当前只被动捕获正常页面请求，浏览器原生生成 Cookie、来源页、客户端提示和动态请求头，不硬编码或伪造签名。存档仅记录安全的请求环境摘要（浏览器 UA、客户端提示、前端版本、来源页路径、请求头名称），不保存鉴权头值。后续主动请求应先验证同一浏览器上下文的请求方式，不能假定复制 Cookie 即可复用。官方 API 单独实现官方签名。
+网页通道使用每账户专用 Chrome 的真实会话。当前只被动捕获正常页面请求，浏览器原生生成 Cookie、来源页、客户端提示和动态请求头，不硬编码或伪造签名。存档仅记录安全的请求环境摘要（浏览器 UA、客户端提示、前端版本、来源页路径、请求头名称），不保存鉴权头值。后续主动请求应先验证同一浏览器上下文的请求方式，不能假定复制 Cookie 即可复用。
 
 ## 订单入库与查询
 
@@ -141,76 +141,17 @@ npm run build
 
 采购汇总使用进程内缓存，按账户与“包含赠品”选项分别保存。普通读取和插件按 1688 商品编号查询都复用缓存；首次读取或服务重启后首次读取会计算一次。只有“刷新采购汇总”显式请求 `GET /api/accounts/{id}/procurement?gifts=0|1&refresh=1` 才更新对应缓存，同步订单、指定厂家和保存规格映射均不会自动使其失效。`GET /api/accounts/{id}/procurement/offers/{offerId}?gifts=0|1` 返回 `{found:true,snapshot:{...}}` 或 `{found:false,createdAt:...}`；快照仅包含当前账户该货源的商品标题、规格、数量及图片，时间为缓存生成的毫秒时间戳，不包含订单明细或买家信息。
 
-### 官方 API 获取待处理订单
+## 代码结构
 
-订单记录页新增「官方 API 同步待处理订单」，与「网页采集全部订单 / 网页采集待处理订单」并存。在「API 管理」中保存当前账户对应的名称、API ID（AppKey）、API Key（AppSecret），可选子账户 ID，再设为当前使用。凭证与当前选择保存在本地 SQLite；列表接口不返回 Key；点击编辑时读取完整凭证，表单直接显示 Key，可查看和修改，留空仍保留原值。同步时从服务端读取当前凭证，不再逐次输入。API 同步不需要打开登录浏览器；网页采集仍用于全部状态、产品货源、中文翻译和退款字段补充。
-
-API 获取 `search_package_list(appPackageTab=waitProcess)` 的完整分页，再获取采购记录 `purchase_record/search_list` 的完整分页。以 `(platform, orderInfo.platformOrderSn)` 关联采购记录的 `opOrderPackageList`：存在 `relateStatus=normal` 的关联归「已出货」，否则归「未出货」。供应商的 `wait_send/has_send` 发货状态不用于这两组判断。订单号按原始 JSON 数字精度处理。遇到同订单多包裹等无法唯一关联、未知关联状态或独立赠品结构时，任务报错并提示使用网页采集。
-
-两轮完整拉取的订单标识、商品数量/规格/赠品/退款相关字段和分组一致后，才在一个数据库事务内更新包裹、商品及两个分组。分页缺失、重复包裹、数据变动、取消或失败均不会提交部分结果；API 拉取期间如已有网页数据入库，也会放弃本轮提交，避免覆盖更新的数据。完整成功响应保存在 `data/openapi/<账户存储键>/<任务编号>/0001.json` 等文件，最终状态写入 `result.json`，文件权限为 0600。无需提交密钥即可查看当前任务进度及停止任务。
-
-两种获取方式使用相同的包裹和商品唯一键、货源关联、规格翻译、卖家指定及采购汇总。API 的布尔型 `isGift` 归一为网页赠品标记；API 缺少的 `refundQuantity` 等字段按商品行 ID 保留原网页值，退款数据仍以该次网页采集时间为准；如官方订单退款时间发生变化，则将对应退款件数标为待补齐。新增商品行缺少退款数量且无退款记录时，采购汇总按退款 0 件计入需求；存在退款标记或退款时间但件数不明的商品仍列为「待补齐」，完成网页采集并刷新汇总后补齐。成功 API 同步会清除该账户采购缓存，下一次读取时重新计算。
-
-本地回归样本（2026-11-17）：497 个包裹，未出货 305、已出货 192，分组成员完全一致。不含赠品：357 件、83 个货源分组、185 个规格；含赠品：662 件、87 个货源分组、191 个规格。API 合并前后逐货源、逐规格数量、订单来源行和卖家指定均一致。该结论针对已验证样本，实时退款变化仍需网页补充。
-
-后端接口：`POST /api/accounts/{id}/sync-openapi` 无需请求体，使用当前账户已选中的 API 凭证；`GET /api/accounts/{id}/openapi-status` 查询进度；`POST /api/accounts/{id}/stop-openapi` 停止任务。当前 API 同步范围是待处理的两个采购分组，其他历史状态继续使用网页采集。
-
-2026-11-17 15:15 的实际接入验收：先用保留的网页采集补齐新增商品的退款字段，再经新 API 同步入口完整拉取两轮并入库。最新 500 个包裹中，未出货 308、已出货 192，逐包裹成员与网页完成凭证一致；不含赠品 360 件（83 个货源分组、179 个规格），含赠品 668 件（87 个货源分组、183 个规格），两套汇总的规格、数量、订单明细及卖家指定均完全相同，待补齐商品为 0。验收记录位于本地 `data/openapi-validation/acceptance.json`，完整 API 响应位于对应 `data/openapi/` 任务目录。API 对 429、502、503、504 最多重试两次；仍失败则保留原有业务数据。
-
-## 代码结构与扩展方式
-
-项目只有一份业务系统；网页与 API 是可替换的数据接入通道。
-
-```text
-main.go                              启动与依赖组装
-internal/
-  server/                            HTTP 路由、页面接口
-  application/ordersync/             同步任务：获取 → 提交 → 更新进度
-  domain/
-    orders/                          数据批次、订单合并、分组规则
-    procurement/                     赠品、退款、货源和规格汇总
-  adapters/miaoshou/
-    openapi/                         官方签名、分页、关联字段转换、响应留存
-    web/
-      archive.go, scopes.go          网页响应和完整分页凭证解析
-      worker/                        Node 浏览器采集进程
-      browser/                       本机 / Docker 浏览器运行环境
-  store/                             SQLite 读写、事务、归档重放、查询补充数据
-  diagnostics/openapicompare/         手工核对工具，不参与业务运行
-cmd/
-  replay/                            重放本地网页存档
-  openapi-compare/                    小批量官方 API 对照诊断
-web/src/                             工作台前端
-```
-
-依赖方向：`server` 组装应用流程和适配器；`application` 依赖业务模型与接口；`adapters` 将外部格式转换为业务输入；`store` 实现持久化接口；`domain` 不依赖任何外部通道、HTTP 或数据库。持久化代码不再导入妙手 API 客户端，也不解析妙手接口 URL、签名或响应信封。
-
-两种通道的时间模型不同，保留其自然形式：官方 API 由 `Source.Fetch` 拉取一个完整 `orders.Batch`，再通过 `Repository.ImportBatch` 提交；网页进程异步写存档，重放时由 `ArchiveDecoder` 转成 `orders.Archive`。两者共用 `orders.Record`、`orders.Scope`、`saveOrderRecord` 和业务合并规则。只有完整分组才能替换分组成员；单页订单可以先入库，未完成的多页采集不清空现有分组。
-
-`orders.Record.ID` 是业务唯一标识，`Fields` 是兼容现有数据库和前端的订单读模型，保留扩展字段；它不是 HTTP 响应信封。此轮不重写已有字段名或数据库结构。适配器负责 `isGift`、采购关联等来源差异；业务层负责已有字段补充、退款数据有效性和采购计算。
-
-增加数据来源时，实现拉取接口 `Source`，或对文件来源实现 `ArchiveDecoder`，输出上述统一模型并在入口组装即可。业务层不增加来源名称分支，不复制汇总代码。写操作使用独立业务接口：`application/packing.Submitter` 当前由网页适配器实现。官方采购运单写入试验仍仅由独立诊断命令调用，不参与手动提交代打包。
-
-内部业务标识使用数据库自增 ID 和外部业务 ID，任务目录使用可读时间及序号。原始 JSON 不做 hash、SHA256、MD5 或 UUID 校验/编号。唯一保留的 SHA256 算法是妙手官方协议要求的 HMAC 请求签名。分页完整性、去重、事务、任务取消和退款件数处理属于数据正确性规则，继续保留。
-
-诊断工具现在直接在项目根目录运行，例如：
-
-```sh
-go run ./cmd/openapi-compare --raw-dir data/raw/ACCOUNT_DIRECTORY --dry-run
-```
-
-原 `order_processor-openapi` 独立工程已迁出源码树，诊断代码与调研文档已合并。原工程全部文件、未提交修改及 Git 历史的可恢复备份为 `data/backups/legacy-openapi-project-20261117-153059.tar.gz`。重构前后的当前业务结果对照保存在 `data/refactor-validation/result.json`，按实际数据比较，不生成校验哈希。
-
-### API 凭证管理
-
-侧栏「API 管理」按当前账户维护多组名称、API ID 和 Key。支持添加、编辑、删除及切换当前使用的凭证，切换只影响后续任务，正在运行的任务继续使用启动时读取的凭证。删除当前凭证后需重新选择，系统不会自动换用另一组。
-
-数据保存在 `data/orders.db` 的 `api_credentials` 表中，使用自增 ID；未增加哈希或额外加密机制。服务端凭证类型位于 `internal/domain/connections`，持久化位于 `internal/store/api_credentials.go`，HTTP 管理接口位于 `internal/server/api_credentials.go`。订单业务层和采集适配器不负责凭证管理。
-
+- `internal/adapters/miaoshou/web` 通过账户容器浏览器采集网页响应，并解析订单和完整分页凭证。
+- `internal/store` 负责 SQLite 入库、归档重放和查询。只有采集完整的分组才能替换分组成员。
+- `internal/domain` 定义订单、采购汇总和打包规则。
+- `internal/server` 提供工作台接口和实时推送，`web/src` 提供操作界面。
+- `cmd/replay` 可重放已有网页存档。
 
 ### 手动提交代打包（网页适配器）
 
-在「订单记录」点击包裹的「提交代打包」。当前支持不使用货代（`forwarderId=0`），录入 1688 采购信息或国内快递单号；勾选的商品共享本次采购单或快递单，选择普通商品时，同包裹赠品自动使用同一份提交信息。不同商品对应不同采购单时分次提交。通过账户管理中的妙手网页登录会话执行，不读取 API 管理中的 ID / Key。
+在「订单记录」点击包裹的「提交代打包」。当前支持不使用货代（`forwarderId=0`），录入 1688 采购信息或国内快递单号；勾选的商品共享本次采购单或快递单，选择普通商品时，同包裹赠品自动使用同一份提交信息。不同商品对应不同采购单时分次提交。通过账户管理中的妙手网页登录会话执行。
 
 本地入口：`POST /api/accounts/{accountId}/packages/{packageId}/packing`。业务参数定义在 `internal/domain/packing`；应用层校验所选订单商品行确实属于当前账户的包裹；网页适配器负责转换成 ERP 的嵌套表单：
 
@@ -224,7 +165,7 @@ purchaseOrderInfoList[0][opOrderItemIdAndPurchaseOrderInfoMap][订单商品行ID
 
 每次提交在 `data/runtime/<账户目录>/packing/<时间-序号>/` 保存业务转换后的 `request.json`、实际发送的 `request.form.txt`、完整 `response.txt` / `response.json` 和 `result.json`。没有收到响应时只记录请求与结果未知。请求失败不自动重发；成功判定同时检查 HTTP 状态、业务结果、成功/失败数量及逐项错误。
 
-提交不会直接修改本地订单分组或采购汇总。成功后点击表单里的「同步待处理订单」，使用现有网页采集流程重新核对未出货、已出货；同步完成后点击订单列表「查询」。部分成功或结果未知时先去妙手核对，再决定后续操作。无需切换订单的官方 API 读取方式。
+提交不会直接修改本地订单分组或采购汇总。成功后点击表单里的「同步待处理订单」，使用现有网页采集流程重新核对未出货、已出货；同步完成后点击订单列表「查询」。部分成功或结果未知时先去妙手核对，再决定后续操作。
 
 浏览器进程测试使用完全拦截的模拟网页与响应，不使用真实账号写入；Go 测试验证字段映射、商品归属、失败不重试、业务结果解析和不修改本地分组。更新浏览器代码后需重建镜像并更新已有容器，容器的 profiles/raw/runtime/snapshots 挂载目录须保留。
 
@@ -244,57 +185,4 @@ purchaseOrderInfoList[0][opOrderItemIdAndPurchaseOrderInfoMap][订单商品行ID
 
 重启时已完成项不再提交，未开始项保留；原本正在提交的项标记为结果未知并暂停，避免盲目重发。空闲等待中的任务在服务恢复后继续排队。网页登录失效或浏览器被占用时暂停，完成登录或关闭远程桌面后重新排队并继续。真实分组和采购汇总仍由网页采集更新，任务完成后点击「网页同步待处理订单」，采集结束后刷新采购汇总。
 
-新增边界：`domain/packing` 准备固定的包裹请求；`application/packing.Queue` 管理串行执行；`store.PackingJobs` 持久化任务并原子领取、保存结果、恢复中断；`server/packing_jobs.go` 暴露任务列表、创建、明细与操作。启动入口把应用生命周期传给队列，继续复用网页适配器，不依赖官方 API 凭证。
-
-### 独立测试：采购单更新平台运单信息
-
-对应 [官方 api-479599777](https://s.apifox.cn/fd54e57e-9b98-4c34-bada-306221c39e68/api-479599777)，接口路径为 `/open/v1/ewm/goods_purchase_order/goods_purchase_order/operate/update_goods_purchase_order_outer_shipping`。2026-11-17 核对的文档以 `goodsPurchaseOrderId`（妙手采购单 ID）为必填字段；`purchaseOrderInfo` 和 `shippingId` 可选。采购单 ID 与包裹 ID、1688 订单号不同。该接口包含网页表单相似的采购字段，但是否能完成订单“提交代打包”、是否改变未出货/已出货分组，须实际回查，不能仅凭返回成功推定。
-
-独立入口 `cmd/openapi-purchase-shipping` 不由后台服务启动，也不更新本地订单、分组或采购汇总。默认只预览 JSON，不访问数据库或网络；只有显式 `--submit` 才读取所选本地账户在 API 管理中设定的当前凭证并发送一次请求。数据库以只读模式打开，不运行迁移。写入不自动重试；连接中断或网关失败时保留结果未知状态，先核对远端采购单。
-
-请求文件示例（先填入真实采购单 ID，其余字段按实际信息填写；不需要的可选字段应删除）：
-
-```json
-{
-  "goodsPurchaseOrderId": "",
-  "purchaseOrderInfo": {
-    "purchasePlatform": "1688",
-    "purchaseOrderSn": "",
-    "purchaseOrderBuyer": "",
-    "purchaseOrderSeller": "",
-    "purchaseOrderPackages": [
-      {
-        "purchaseOrderLogisticsName": "",
-        "purchaseOrderWaybillCode": ""
-      }
-    ]
-  }
-}
-```
-
-在项目根目录预览：
-
-```sh
-go run ./cmd/openapi-purchase-shipping --request data/purchase-shipping-request.json
-```
-
-资料核对完成后实际提交：
-
-```sh
-go run ./cmd/openapi-purchase-shipping --account 1 --request data/purchase-shipping-request.json --submit
-```
-
-`--db` 可指定数据库；`--response-dir` 可指定存档根目录。默认在 `data/openapi-purchase-shipping/<时间>/` 保存：
-
-- `attempt.json`：接口、账户、凭证名称/编号与时间，不含 Key 或签名。
-- `request.json`：与实际发送一致的请求 JSON，发送前落盘。
-- `response.json`：完整原始响应，包括业务失败；非 JSON 响应写入 `response.txt`。
-- `result.json`：HTTP 状态、API 是否明确报告成功及错误说明。没有收到响应时仍保存结果。
-
-写接口接受文档中的无 `data` 成功信封；现有读取接口的解析和重试行为保持原样。测试使用注入的离线 HTTP transport，不会向真实妙手发送采购更新。
-
-任务管理页面：左侧「任务管理」（`#/tasks`）集中查看当前账户的代打包任务，支持任务名称/编号搜索、状态筛选、包裹进度、创建/更新时间和执行明细。每 3 秒更新状态；沿用暂停、继续、取消剩余包裹和逐包裹异常处理。采购汇总保留任务入口，所有提交仍由同一后台队列串行执行。
-
-订单详情中的单包裹提交同样记录到任务管理：先落库为正在提交，再调用网页适配器并保存完整结果与响应存档路径。服务中断后保留待核对记录，避免自动重复提交；单包裹与批量任务共用全局串行约束。
-
-已完成的代打包任务支持「修改并重新执行」：读取原任务快照，自动补入同包裹赠品，按相同打包信息分组编辑采购信息、快递单、金额、备注和等待间隔；保存为新的串行任务，保留原任务及原响应。重执行按原任务包裹/商品范围校验，不要求订单仍属于待采购清单。预览和打开表单不会向妙手提交，点击「保存为新任务并执行」后才排队。
+新增边界：`domain/packing` 准备固定的包裹请求；`application/packing.Queue` 管理串行执行；`store.PackingJobs` 持久化任务并原子领取、保存结果、恢复中断；`server/packing_jobs.go` 暴露任务列表、创建、明细与操作。启动入口把应用生命周期传给队列，继续复用网页适配器。

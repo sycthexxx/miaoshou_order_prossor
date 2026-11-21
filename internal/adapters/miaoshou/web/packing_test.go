@@ -57,7 +57,6 @@ type packingRuntime struct{ target browser.Target }
 func (r packingRuntime) Resolve(context.Context, string, bool) (browser.Target, error) {
 	return r.target, nil
 }
-func (r packingRuntime) Remote() bool { return true }
 func TestPackingWorkerFailureNeverRetries(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

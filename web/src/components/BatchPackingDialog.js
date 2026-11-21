@@ -1,36 +1,48 @@
 import WaybillFields from './WaybillFields.js';
 import {formatOrderTime} from '../lib/procurement-orders.js';
 import PurchaseFields from './PurchaseFields.js';
-import {ref,reactive,computed,onMounted} from 'vue/dist/vue.esm-bundler.js';
+import {ref,reactive,computed,watch,inject,onMounted,onUnmounted} from 'vue/dist/vue.esm-bundler.js';
 import ProductImage from './ProductImage.js';
 import {sourceLines,filteredLines,selectionStats,groupLinesBySpec,filterOptions} from '../lib/packing-selection.js';
 export default {
- components:{WaybillFields,ProductImage,PurchaseFields},props:['group','account','api','gifts','leaseId'],emits:['close','created'],
+ components:{WaybillFields,ProductImage,PurchaseFields},props:['group','account','api','gifts','leaseId','packingBlock'],emits:['close','created'],
  setup(props,{emit}){
   const dialog=ref(),busy=ref(false),uncertain=ref(false),error=ref('');
-  const lines=sourceLines(props.group),selected=ref(new Set()),filters=reactive({sources:[],colors:[],sizes:[],query:''});
-  const colors=computed(()=>filterOptions(lines,filters,'color')),sizes=computed(()=>filterOptions(lines,filters,'size'));
-  const visible=computed(()=>filteredLines(lines,filters)),stats=computed(()=>selectionStats(lines,selected.value));
+  const lines=computed(()=>sourceLines(props.group)),selected=ref(new Set()),filters=reactive({sources:[],colors:[],sizes:[],query:''});
+  const colors=computed(()=>filterOptions(lines.value,filters,'color')),sizes=computed(()=>filterOptions(lines.value,filters,'size'));
+  const visible=computed(()=>filteredLines(lines.value,filters)),stats=computed(()=>selectionStats(lines.value,selected.value));
   const variants=computed(()=>groupLinesBySpec(visible.value));
-  const appliedVariants=computed(()=>groupLinesBySpec(lines.filter(l=>selected.value.has(l.key))));
+  const appliedVariants=computed(()=>groupLinesBySpec(lines.value.filter(l=>selected.value.has(l.key))));
   function toggle(list,checked){const next=new Set(selected.value);for(const l of list)checked?next.add(l.key):next.delete(l.key);selected.value=next}
   const allSelected=list=>list.length>0&&list.every(l=>selected.value.has(l.key));
   const mode=ref('waybill'),company=ref(''),number=ref(''),amount=ref(''),autoSync=ref(true),interval=ref(5);
   const suffix=Math.floor(100000+Math.random()*900000);
   const name=computed(()=>`${props.group.supplier?.name||'未指定厂家'}-${stats.value.quantity}件-${suffix}`);
   const purchase=reactive({platform:'1688',orderNumber:'',buyer:'',seller:'',payment:''});
-  onMounted(()=>dialog.value.showModal());
+  const noticeHost=inject('order-notice-host',null),noticeSlot=ref(null);
+  watch(lines,current=>{
+   const keys=new Set(current.map(line=>line.key));
+   selected.value=new Set([...selected.value].filter(key=>keys.has(key)));
+  },{flush:'sync'});
+  onMounted(()=>{
+   dialog.value.showModal();
+   if(noticeHost)noticeHost.value=noticeSlot.value;
+  });
+  onUnmounted(()=>{if(noticeHost)noticeHost.value=null});
+
   function close(){if(!busy.value)emit('close')}
   async function save(){
-   if(busy.value||uncertain.value||!stats.value.lines)return;busy.value=true;error.value='';
-   const selections=lines.filter(l=>selected.value.has(l.key)).map(l=>({packageId:String(l.packageId),itemId:String(l.itemId)}));
+   if(busy.value||uncertain.value||!stats.value.lines)return;
+   if(props.packingBlock){error.value=props.packingBlock;return}
+   busy.value=true;error.value='';
+   const selections=lines.value.filter(l=>selected.value.has(l.key)).map(l=>({packageId:String(l.packageId),itemId:String(l.itemId)}));
    const info={amount:amount.value,autoSyncAmount:mode.value==='purchase'&&autoSync.value,...(mode.value==='purchase'?{purchase:{...purchase}}:{waybills:[{company:company.value,number:number.value}]})};
    try{const result=await props.api(`/accounts/${props.account}/packing-jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-Supplier-Lease':String(props.leaseId)},body:JSON.stringify({name:name.value,sourceKey:props.group.key,gifts:props.gifts,intervalSeconds:Number(interval.value),selections,info})});emit('created',result.id);emit('close')}
    catch(e){error.value=e.message;if(!e.status||e.status>=500){uncertain.value=true;error.value+='。请关闭表单并查看任务列表，确认是否已保存，避免重复创建。';emit('created',null)}}finally{busy.value=false}
   }
-  return{formatOrderTime,dialog,busy,error,uncertain,lines,selected,filters,colors,sizes,visible,variants,appliedVariants,stats,toggle,allSelected,mode,company,number,amount,autoSync,interval,name,purchase,close,save};
+  return{noticeSlot,formatOrderTime,dialog,busy,error,uncertain,lines,selected,filters,colors,sizes,visible,variants,appliedVariants,stats,toggle,allSelected,mode,company,number,amount,autoSync,interval,name,purchase,close,save};
  },template:`<dialog ref="dialog" class="packing-dialog batch-packing-dialog" aria-labelledby="batch-packing-title" @cancel.prevent="close"><form @submit.prevent="save">
- <header><div><h2 id="batch-packing-title">{{group.sources?'厂家批量提交代打包':'货源批量提交代打包'}}</h2><p v-if="group.sources">{{group.supplier.name}} · {{group.sources.length}} 个货源 · 不使用货代</p><p v-else>{{group.source.source}} · {{group.source.sourceItemId}} · 不使用货代</p></div><button type="button" class="secondary" :disabled="busy" @click="close">关闭</button></header>
+ <header><div><h2 id="batch-packing-title">{{group.sources?'厂家批量提交代打包':'货源批量提交代打包'}}</h2><p v-if="group.sources">{{group.supplier.name}} · {{group.sources.length}} 个货源 · 不使用货代</p><p v-else>{{group.source.source}} · {{group.source.sourceItemId}} · 不使用货代</p></div><button type="button" class="secondary" :disabled="busy" @click="close">关闭</button></header><div ref="noticeSlot" class="batch-notice-slot"></div>
  <fieldset :disabled="busy||uncertain" class="batch-info"><legend>填写打包信息</legend><div v-if="!group.sources" class="batch-product"><ProductImage :item="group.image"/><div><strong>{{group.title}}</strong><p>{{group.supplier?.name||'未指定厂家'}}</p></div></div>
  <div class="packing-modes"><label><input type="radio" value="waybill" v-model="mode">录入快递单号</label><label><input type="radio" value="purchase" v-model="mode">录入采购信息（自动同步快递单号）</label></div>
  <div v-if="mode==='waybill'" class="packing-fields"><WaybillFields :api="api" :account="account" v-model:number="number" v-model:company="company"/></div>

@@ -57,7 +57,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
 
    const {workbench,...publicTask}=task;return {ok:true,task:publicTask,connectURL:workbench.origin};
   }
-  if(['REPORT_SUPPLIER','GET_PROCUREMENT_MAPPING','PUT_PROCUREMENT_MAPPING'].includes(message.type)){
+  if(['REPORT_SUPPLIER','GET_PROCUREMENT_MAPPING','PUT_PROCUREMENT_MAPPING','REPORT_SOURCE_STATUS'].includes(message.type)){
    const id=offerId(sender.url);if(!sender.tab||!id||sender.frameId!==0)throw Error('无效货源页面');
    const key='task:'+sender.tab.id,{[key]:task}=await chrome.storage.session.get(key);
    if(!task||task.offerId!==id||!task.workbench)throw Error('请重新从采购汇总打开货源');
@@ -65,8 +65,9 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
    let tab;try{tab=await chrome.tabs.get(task.workbench.tabId)}catch{throw Error('工作台标签页已关闭，请重新从采购汇总打开货源')}
    if(new URL(tab.url).origin!==task.workbench.origin||!await allowedOrigin(tab.url))throw Error('原工作台页面已离开，请重新从采购汇总打开货源');
    // Destination and account come from the opening workbench, never from 1688.
-   const request={type:message.type==='REPORT_SUPPLIER'?'SAVE_CAPTURED_SUPPLIER':message.type==='GET_PROCUREMENT_MAPPING'?'GET_PURCHASE_MAPPING':'PUT_PURCHASE_MAPPING',origin:task.workbench.origin,account:task.account,productId:id};
+   const request={type:message.type==='REPORT_SOURCE_STATUS'?'SAVE_SOURCE_STATUS':message.type==='REPORT_SUPPLIER'?'SAVE_CAPTURED_SUPPLIER':message.type==='GET_PROCUREMENT_MAPPING'?'GET_PURCHASE_MAPPING':'PUT_PURCHASE_MAPPING',origin:task.workbench.origin,account:task.account,productId:id};
    if(message.type==='REPORT_SUPPLIER')request.name=name;
+   if(message.type==='REPORT_SOURCE_STATUS'){if(!['valid','invalid'].includes(message.state))throw Error('无效货源状态');request.state=message.state;request.reason=message.reason;request.evidence=message.evidence}
    if(message.type==='PUT_PROCUREMENT_MAPPING'){request.mapping=message.mapping;request.revision=message.revision}
    try{return await chrome.tabs.sendMessage(tab.id,request,{frameId:0})}catch{throw Error('无法连接工作台，请刷新工作台并重新打开货源')}
   }

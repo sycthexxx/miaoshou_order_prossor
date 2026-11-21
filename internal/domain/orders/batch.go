@@ -19,29 +19,6 @@ type Scope struct {
 	PackageIDs []string
 }
 
-type ImportPolicy struct {
-	PreserveMissingFields     bool
-	RequireUnchangedAccount   bool
-	RequireWholeOrderPurchase bool
-}
-
-type Batch struct {
-	Source     string
-	CapturedAt string
-	Archive    string
-	Records    []Record
-	Scopes     []Scope
-	Policy     ImportPolicy
-}
-
-type ImportResult struct {
-	Packages           int `json:"packages"`
-	WaitPurchase       int `json:"waitPurchase"`
-	HasPurchase        int `json:"hasPurchase"`
-	MissingRefundLines int `json:"missingRefundLines"`
-	SupplementedLines  int `json:"supplementedLines"`
-}
-
 // Archive is a verified input document, independent of a provider's endpoint
 // names, envelope keys and archive representation.
 type Archive struct {

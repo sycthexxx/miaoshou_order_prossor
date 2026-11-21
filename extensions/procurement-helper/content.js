@@ -11,7 +11,7 @@
  `;shadow.append(style);
  const make=(tag,cls,text)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el};
  const bubble=make('button','bubble','采购清单'),panel=make('section','panel');bubble.title='拖动移动，点击展开采购清单';bubble.setAttribute('aria-expanded','false');panel.hidden=true;
- const head=make('div','head','待采购商品 · 0.1.12'),close=make('button','plain','收起');head.append(close);
+ const head=make('div','head','待采购商品 · 0.1.15'),close=make('button','plain','收起');head.append(close);
  const body=make('div','body'),footer=make('div','footer'),summary=make('span','','等待核对'),rescan=make('button','','重新核对'),resetAll=make('button','','清除核对');footer.append(summary,rescan,resetAll);panel.append(head,body,footer);shadow.append(bubble,panel);
  let dragged=false,expanded=false;
  function clamp(){const r=host.getBoundingClientRect();host.style.left=Math.max(8,Math.min(r.left,innerWidth-r.width-8))+'px';host.style.top=Math.max(8,Math.min(r.top,innerHeight-r.height-8))+'px';host.style.right='auto'}
@@ -38,6 +38,25 @@
  body.append(make('p','note','绿色 = 数量核对一致，不代表已下单。切换颜色保留已核对结果，切回自动更新。若在其他位置清空选择，请点“清除核对”。SKU图来自本地订单，点击可放大。'));
  if(Date.now()-(typeof task.createdAt==='number'?task.createdAt:Date.parse(task.createdAt))>86400000)body.append(make('p','notice','这是超过一天的采购快照，请刷新采购汇总并重新打开货源。'));
  const notice=make('p','notice','无法识别时，先展开商品规格，并选中颜色；可以填写对应的 1688 规格，再指定数量框。');body.append(notice);
+ let knownSourceStatus=task.sourceStatus;
+ const savedSourceText=()=>OPSourceStatus.resultText({sourceStatus:knownSourceStatus});
+ const sourceStatusBox=make('div','mapping'),sourceStatusText=make('p','note',savedSourceText()+' 正在检查当前货源。'),checkSourceButton=make('button','','重新检查货源');
+ sourceStatusBox.append(make('strong','','货源状态'),sourceStatusText,checkSourceButton);body.append(sourceStatusBox);
+ let sourceStatusBusy=false,sourceCandidate='',sourceStable=0,sourceAttempts=0,sourceReported='';
+ async function checkSource(){
+  if(sourceStatusBusy||offerId(location.href)!==task.offerId)return;
+  const reading=OPSourceStatus.inspect(document,task.offerId);
+  if(!reading){sourceCandidate='';sourceStable=0;sourceStatusText.textContent=savedSourceText()+' 当前页面未识别到可靠新状态，保持不变。';return}
+  const key=JSON.stringify(reading);sourceStable=key===sourceCandidate?sourceStable+1:1;sourceCandidate=key;
+  if(key===sourceReported)return;
+  if(sourceStable<2){sourceStatusText.textContent='已识别：'+reading.reason+'；正在再次确认后回传。';return}
+  sourceStatusBusy=true;checkSourceButton.disabled=true;sourceStatusText.textContent='已确认：'+reading.reason+'；正在回传后台…';
+  try{const r=await chrome.runtime.sendMessage({type:'REPORT_SOURCE_STATUS',...reading});if(!r?.ok)throw Error(r?.error||'货源状态保存失败');sourceReported=key;knownSourceStatus=r.result.sourceStatus;sourceStatusText.textContent='回传成功：'+OPSourceStatus.resultText(r.result)}
+  catch(e){sourceStatusText.textContent=savedSourceText()+' 回传失败：'+e.message+'；可点击重新检查货源重试。'}
+  finally{sourceStatusBusy=false;checkSourceButton.disabled=false}
+ }
+ checkSourceButton.onclick=()=>{sourceReported='';void checkSource();setTimeout(()=>void checkSource(),1500)};
+ void checkSource();const sourceStatusTimer=setInterval(()=>{if(++sourceAttempts>20||offerId(location.href)!==task.offerId){clearInterval(sourceStatusTimer);return}void checkSource()},1500);
  const supplierBox=make('div','mapping'),supplierTitle=make('strong','','厂家 / 店铺'),supplierInput=make('input','alias'),supplierStatus=make('p','note','正在读取页面厂家名称…'),readSupplier=make('button','','重新读取'),saveSupplier=make('button','','回传厂家');
  supplierInput.placeholder='未识别时可手动填写厂家名称';supplierInput.setAttribute('aria-label','厂家或店铺名称');supplierInput.maxLength=120;
  supplierBox.append(supplierTitle,supplierInput,readSupplier,saveSupplier,supplierStatus);body.append(supplierBox);

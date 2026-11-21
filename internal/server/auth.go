@@ -155,7 +155,7 @@ func (a *authentication) allowed(r *http.Request, pattern, account string, id in
 	}
 	operation := strings.Split(strings.TrimPrefix(route, prefix), "/")[0]
 	switch operation {
-	case "api-credentials", "login", "restart-container", "close", "archives":
+	case "login", "restart-container", "close", "archives":
 		return false
 	}
 	var allowed bool

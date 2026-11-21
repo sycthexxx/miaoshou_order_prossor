@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"order_processor/internal/store"
@@ -41,6 +42,22 @@ func TestSupplierCaptureLANRoute(t *testing.T) {
 	if w := request(account, "http://192.168.1.104:17381", body); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	// Procurement ownership is a separate activity: another employee may still
+	// report unchanged or corrected supplier metadata through this endpoint.
+	if _, e = db.Exec(`INSERT INTO app_users(id,username,password,is_admin) VALUES(2,'purchaser','test-only',1)`); e != nil {
+		t.Fatal(e)
+	}
+	var supplierID int64
+	if e = db.QueryRow(`SELECT supplier_id FROM source_suppliers WHERE account_id=? AND product_id='100'`, account).Scan(&supplierID); e != nil {
+		t.Fatal(e)
+	}
+	lease, e := store.AcquireSupplier(context.Background(), db, account, store.SupplierLease{Supplier: supplierID, UserID: 2})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if w := request(account, "http://192.168.1.104:17381", body); w.Code != 200 {
+		t.Fatal("same-name capture blocked", w.Code, w.Body.String())
+	}
 	w := request(account, "http://192.168.1.104:17381", `{"productId":"100","name":"新的页面厂家"}`)
 	var result map[string]any
 	if e = json.Unmarshal(w.Body.Bytes(), &result); e != nil {
@@ -48,6 +65,10 @@ func TestSupplierCaptureLANRoute(t *testing.T) {
 	}
 	if w.Code != 200 || result["assigned"] != float64(0) || result["retained"] != float64(0) || result["updated"] != float64(1) || result["supplierName"] != "新的页面厂家" {
 		t.Fatal(w.Code, result)
+	}
+	leases, e := store.SupplierLeases(context.Background(), db, account)
+	if e != nil || len(leases) != 1 || leases[0] != lease {
+		t.Fatal("capture changed procurement ownership", leases, e)
 	}
 	if w := request(other, "http://192.168.1.104:17381", body); w.Code != 400 {
 		t.Fatal(w.Code, w.Body.String())

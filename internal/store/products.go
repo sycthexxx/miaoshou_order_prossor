@@ -32,7 +32,11 @@ func saveProduct(tx *sql.Tx, account, at, file string, p object) error {
 
 type productKey struct{ platform, shop, id string }
 
-func productMap(db *sql.DB, account string) (map[productKey]object, error) {
+type rowsQuerier interface {
+	Query(string, ...any) (*sql.Rows, error)
+}
+
+func productMap(db rowsQuerier, account string) (map[productKey]object, error) {
 	rows, e := db.Query(`SELECT id,platform,shop_id,platform_item_id,payload,captured_at FROM shop_products WHERE account_id=? ORDER BY id`, account)
 	if e != nil {
 		return nil, e

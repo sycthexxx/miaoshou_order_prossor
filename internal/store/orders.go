@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS imported_archives(id INTEGER PRIMARY KEY AUTOINCREMEN
 	return e
 }
 
-func Orders(db *sql.DB, account, query string, page, size int, statuses ...string) (object, error) {
+func Orders(db rowsQuerier, account, query string, page, size int, statuses ...string) (object, error) {
 	// A bounded page is returned; source snapshots stay in SQLite for reprocessing.
 	rows, e := db.Query("SELECT id,package_id,payload,captured_at,source_file FROM packages WHERE account_id=? ORDER BY captured_at DESC,package_id DESC", account)
 	if e != nil {

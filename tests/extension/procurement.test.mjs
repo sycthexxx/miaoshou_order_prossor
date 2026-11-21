@@ -51,3 +51,10 @@ test('quantity changes trigger follow without a button event, but color switches
  assert.deepEqual(track(values(null,null),'粉红色'),[]);
  assert.deepEqual(track(values(null,2),'粉红色'),[]);
 });
+
+test('click handoff and direct snapshots retain source status whitelist',()=>{
+ const g=group('https://detail.1688.com/offer/100.html','M',1);g.sourceStatus={state:'invalid',reason:'removed manually',checkedAt:stamp,source:'manual',private:'secret'};
+ const p=procurementHandoff([g],g,'7',stamp);assert.deepEqual(p.sourceStatus,{state:'invalid',reason:'removed manually',checkedAt:stamp,source:'manual'});
+ assert.deepEqual(snapshot({...p,sourceStatus:g.sourceStatus}).sourceStatus,p.sourceStatus);
+ assert.equal(snapshot({...p,sourceStatus:undefined}).sourceStatus.state,'unknown');
+});

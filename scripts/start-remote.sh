@@ -1,7 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export ORDER_BROWSER_MODE=docker
 export ORDER_LISTEN="${ORDER_LISTEN:-0.0.0.0:17381}"
 export ORDER_BROWSER_IMAGE="${ORDER_BROWSER_IMAGE:-order-processor-browser:1.63.0}"
 # Prepare before Docker COPY: recover missing/incomplete locks without

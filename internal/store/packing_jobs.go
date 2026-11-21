@@ -41,6 +41,9 @@ func (s PackingJobs) CandidatesWithSupplier(account, source string, gifts bool) 
 	out := []packing.Candidate{}
 	var supplierID int64
 	for _, g := range objects(report["groups"]) {
+		if status, _ := g["sourceStatus"].(SourceStatus); status.State == "invalid" {
+			continue
+		}
 		supplier, _ := g["supplier"].(object)
 		fromSupplier := text(supplier["id"]) != "" && text(supplier["id"]) != "0" && source == "supplier:"+text(supplier["id"])
 		if text(g["key"]) != source && !fromSupplier {
@@ -93,6 +96,16 @@ func (s PackingJobs) create(ctx context.Context, account string, in packing.Batc
 	}
 	if !activeAccount {
 		return 0, errors.New("账户不存在")
+	}
+
+	if lease != nil {
+		report, err := Procurement(tx, account, in.Gifts)
+		if err != nil {
+			return 0, err
+		}
+		if count, _ := report["unassignedSources"].(int); count > 0 {
+			return 0, fmt.Errorf("还有 %d 个货源未指定厂家。请先打开货源同步厂家，或标记货源无效，再提交代打包", count)
+		}
 	}
 
 	if state == "running" {

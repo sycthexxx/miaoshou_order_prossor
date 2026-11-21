@@ -1,7 +1,7 @@
 (()=>{
  if(typeof globalThis.__opProcurementBridge?.refresh==='function'){globalThis.__opProcurementBridge.refresh();return}
  function state(ready,error=''){
-  document.documentElement.dataset.opProcurementBridgeReady=ready?'0.1.12':'';
+  document.documentElement.dataset.opProcurementBridgeReady=ready?'0.1.15':'';
   document.documentElement.dataset.opProcurementBridgeError=error;
   window.dispatchEvent(new CustomEvent('op-procurement-bridge-status'));
  }
@@ -11,12 +11,13 @@
   if(sender.id!==chrome.runtime.id)return;
   if(message.type==='REFRESH_WORKBENCH_BRIDGE'){void refresh().then(()=>reply({ok:true}));return true}
   const settings=message.type==='GET_PLUGIN_QUERY_SETTINGS';
-  if(!settings&&!['SAVE_CAPTURED_SUPPLIER','GET_PURCHASE_MAPPING','PUT_PURCHASE_MAPPING','GET_PURCHASE_OFFER'].includes(message.type))return;
+  if(!settings&&!['SAVE_CAPTURED_SUPPLIER','GET_PURCHASE_MAPPING','PUT_PURCHASE_MAPPING','GET_PURCHASE_OFFER','SAVE_SOURCE_STATUS'].includes(message.type))return;
   if(message.origin!==location.origin||(!settings&&(!/^\d+$/.test(message.account)||!/^\d+$/.test(message.productId)))){reply({ok:false,error:'货源回传来源无效'});return}
+  const sourceStatus=message.type==='SAVE_SOURCE_STATUS';
   const supplier=message.type==='SAVE_CAPTURED_SUPPLIER',offer=message.type==='GET_PURCHASE_OFFER',read=settings||offer||message.type==='GET_PURCHASE_MAPPING';
-  const url=settings?'/api/plugin-query-settings':offer?`/api/accounts/${message.account}/procurement/offers/${message.productId}?gifts=${message.gifts?1:0}`:supplier?`/api/accounts/${message.account}/source-supplier/capture`:`/api/accounts/${message.account}/procurement-mappings/${message.productId}`;
+  const url=sourceStatus?`/api/accounts/${message.account}/source-status/${message.productId}`:settings?'/api/plugin-query-settings':offer?`/api/accounts/${message.account}/procurement/offers/${message.productId}?gifts=${message.gifts?1:0}`:supplier?`/api/accounts/${message.account}/source-supplier/capture`:`/api/accounts/${message.account}/procurement-mappings/${message.productId}`;
   const options={method:read?'GET':supplier?'POST':'PUT',credentials:'same-origin',signal:AbortSignal.timeout(15000)};
-  if(!read){options.headers={'Content-Type':'application/json'};options.body=JSON.stringify(supplier?{productId:message.productId,name:message.name}:{revision:message.revision,mapping:message.mapping})}
+  if(!read){options.headers={'Content-Type':'application/json'};options.body=JSON.stringify(sourceStatus?{state:message.state,reason:message.reason,source:'plugin',...(message.evidence?{evidence:message.evidence}:{})}:supplier?{productId:message.productId,name:message.name}:{revision:message.revision,mapping:message.mapping})}
   fetch(url,options).then(async r=>{
     if(r.status===404)throw Error('后端未提供此接口或货源不存在，请更新并重启工作台后端后重试');
     const data=await r.json();reply({ok:r.ok,result:data,status:r.status,...(!r.ok?{error:data.error||'工作台保存失败'}:{})});

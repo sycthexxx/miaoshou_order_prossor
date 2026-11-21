@@ -16,7 +16,7 @@ type PackingSubmitter struct {
 	StorageKey func(string) string
 }
 
-// PackingPayload mirrors manualRelateOrderPackagePurchaseOrders, not the open API.
+// PackingPayload mirrors the browser form for manualRelateOrderPackagePurchaseOrders.
 func PackingPayload(in packing.Request) map[string]any {
 	items := map[string]any{}
 	for _, item := range in.Items {

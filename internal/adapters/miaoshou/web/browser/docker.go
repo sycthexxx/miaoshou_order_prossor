@@ -29,8 +29,6 @@ type Docker struct {
 	Run                    func(context.Context, ...string) ([]byte, error)
 }
 
-func (d *Docker) Remote() bool { return true }
-
 // Fail at startup with actionable instructions rather than hiding Docker
 // problems behind every account's polling request.
 func (d *Docker) Check(ctx context.Context) error {

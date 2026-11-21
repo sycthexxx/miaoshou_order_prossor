@@ -2,7 +2,7 @@
 
 ## Mac 与 Linux 共用远程浏览器模式（默认）
 
-默认 `ORDER_BROWSER_MODE=docker`。Mac 运行 Docker Desktop；Linux 运行 Docker Engine。两边使用同一个浏览器镜像和 noVNC 链路。其他电脑只需浏览器，不需要安装 VNC 客户端。
+工作台使用 Docker 容器采集妙手数据。Mac 运行 Docker Desktop；Linux 运行 Docker Engine。两边使用同一个浏览器镜像和 noVNC 链路。其他电脑只需浏览器，不需要安装 VNC 客户端。
 
 Mac 先启动 Docker Desktop，在终端确认 `docker info` 可执行。停止旧的 Go 工作台进程（确认无同步任务），从项目根目录启动：
 
@@ -18,19 +18,11 @@ npm run start:remote
 
 如果先前已创建旧版浏览器容器，新版会提示重建。先停止对应账户同步、断开桌面，停止并移除旧容器后再打开远程浏览器；保留宿主机数据目录。不要手工覆盖或删除原生 Chrome profile。
 
-仅需本机 Chrome 调试时仍可显式使用：
-
-```sh
-npm run start:local
-```
-
-本机模式不提供远程桌面，登录窗口仅出现在运行后端的电脑。
-
 ## Linux 服务器
 
 Go 工作台在 Linux 宿主机运行，每个妙手账户一个独立容器，里面包含 Chromium、Playwright、Xvfb、x11vnc 和 noVNC。员工访问同一个工作台，通过账户的远程桌面完成登录。不同账户可以并行使用；同一账户只能有一个远程桌面连接，自动采集期间不允许连接桌面。
 
-当前按可信内网使用，没有员工登录或账户权限分配。隔离单位是妙手账户，不是员工。员工可访问工作台里的所有账户。
+员工登录工作台后可操作管理员分配的妙手账户。每个妙手账户使用独立的浏览器容器。
 
 ### 构建
 
@@ -50,7 +42,6 @@ docker build -f deploy/browser/Dockerfile -t order-processor-browser:1.63.0 .
 下面 IP 请替换为服务器内网地址。访问时使用与 ORDER_PUBLIC_ORIGIN 完全一致的协议、主机和端口。
 
 ```sh
-export ORDER_BROWSER_MODE=docker
 export ORDER_DATA_DIR=/srv/order-processor/data
 export ORDER_LISTEN=0.0.0.0:17381
 export ORDER_PUBLIC_ORIGIN=http://192.168.1.10:17381

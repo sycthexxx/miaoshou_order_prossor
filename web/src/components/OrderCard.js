@@ -1,4 +1,4 @@
-import {ref} from 'vue/dist/vue.esm-bundler.js';
+import {computed,ref} from 'vue/dist/vue.esm-bundler.js';
 import SearchSelect from './SearchSelect.js';
 import ProductImage from './ProductImage.js';
 export default {
@@ -11,13 +11,22 @@ export default {
   function selectSeller(source,value){emit('assign',source,value,()=>{delete editing.value[props.sourceKey(source)]})}
 
   const money=(value,currency='')=>value===null||value===undefined||value===''?'—':`${currency} ${Number.isFinite(Number(value))?Number(value).toFixed(2):value}`;
-  const image=i=>{const value=i.picUrlThumb||i.picUrl||i.originalPicUrl;return /^https?:\/\//i.test(value||'')?value:''};
   const date=v=>v?String(v).replace('T',' ').replace(/\.\d+Z$/,''): '—';
   const safe=url=>/^https?:\/\//i.test(url||'')?url:null;
-  return {money,image,date,safe,editing,sellerName,selectSeller};
+  const cancelled=computed(()=>props.order.appPackageStatus==='cancelled'||props.order.platformPackageStatus==='CANCELLED');
+  const statusLabel=computed(()=>{
+   if(cancelled.value)return '已取消';
+   const order=props.order;
+   if(String(order.isIsolation)==='1')return '已搁置';
+   return order.appPackageStatusText||({
+    unpaid:'未付款',pending:'平台处理中',wait_seller_send:'待发货',
+    wait_receiver_confirm:'已发货',finished:'已完成',returned:'已退款'
+   })[order.appPackageStatus]||'未知状态';
+  });
+  return {money,date,safe,editing,sellerName,selectSeller,cancelled,statusLabel};
  },
  template:`<article class="order-card">
- <header class="order-heading"><span class="status-pill">{{order.appPackageStatusText||order.appPackageStatus||'未知状态'}}</span><strong>[{{order.platformName||order.platform}}<template v-if="order.siteName"> · {{order.siteName}}</template>]</strong><strong>{{order.shopName||order.platformShopName}}</strong><span class="order-number">{{order.platformOrderSn||order.orderInfo?.platformOrderSn}}</span><span class="payment">支付途径：{{order.orderInfo?.paymentMethod||'—'}}</span><span class="record-id">本地 #{{order.id}}</span></header>
+ <header class="order-heading" :class="{'order-heading-cancelled':cancelled}"><strong>[{{order.platformName||order.platform}}<template v-if="order.siteName"> · {{order.siteName}}</template>]</strong><strong>{{order.shopName||order.platformShopName}}</strong><span class="order-number">{{order.platformOrderSn||order.orderInfo?.platformOrderSn}}</span><span class="status-pill" :class="{'status-pill-cancelled':cancelled}">{{statusLabel}}</span><span class="payment">支付途径：{{order.orderInfo?.paymentMethod||'—'}}</span><span class="record-id">本地 #{{order.id}}</span></header>
  <div class="order-packing-action"><button class="secondary" @click="$emit('pack',order)">提交代打包</button></div>
  <div class="order-content">
  <div class="products"><div v-for="item in order.items" :key="item.opOrderItemId" class="product-row">

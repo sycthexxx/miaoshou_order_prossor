@@ -54,3 +54,8 @@ test('supplier status distinguishes same name, changed name, and first assignmen
  assert.match(mixed,/更新 2 条/);assert.match(mixed,/3 条同名关联保持不变/);
  assert.throws(()=>OPSupplier.supplierResultText({assigned:0,retained:1,created:false}),/更新并重启/);
 });
+
+test('saved supplier reports cache refresh warning as success text without requesting a supplier retry',()=>{
+ const text=OPSupplier.supplierResultText({assigned:1,updated:0,retained:0,created:false,supplierName:'甲厂',cacheRefreshed:false,cacheRefreshError:'refresh failed'});
+ assert.match(text,/厂家已保存，汇总刷新失败/);assert.match(text,/工作台刷新采购汇总/);assert.doesNotMatch(text,/回传厂家.*重试/);
+});

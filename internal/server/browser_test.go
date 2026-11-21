@@ -20,7 +20,10 @@ func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f
 
 type fixedRuntime struct{ target browser.Target }
 
-func (f fixedRuntime) Remote() bool { return true }
+func (f fixedRuntime) Restart(ctx context.Context, key string) (browser.Target, error) {
+	return f.Resolve(ctx, key, false)
+}
+func (f fixedRuntime) Stop(context.Context, string) error { return nil }
 func (f fixedRuntime) Resolve(context.Context, string, bool) (browser.Target, error) {
 	return f.target, nil
 }
@@ -114,7 +117,10 @@ func TestDefaultLANAddresses(t *testing.T) {
 
 type failedRuntime struct{ err error }
 
-func (f failedRuntime) Remote() bool { return true }
+func (f failedRuntime) Restart(ctx context.Context, key string) (browser.Target, error) {
+	return f.Resolve(ctx, key, false)
+}
+func (f failedRuntime) Stop(context.Context, string) error { return nil }
 func (f failedRuntime) Resolve(context.Context, string, bool) (browser.Target, error) {
 	return browser.Target{}, f.err
 }
@@ -136,7 +142,7 @@ func TestRuntimeFailureShowsActionableReason(t *testing.T) {
 	unavailable := &browser.Docker{Run: func(context.Context, ...string) ([]byte, error) { return nil, errors.New("secret raw daemon failure") }}
 	for _, tc := range []struct {
 		name, action, code, fragment string
-		runtime                      browser.Runtime
+		runtime                      accountBrowserRuntime
 		status                       int
 	}{
 		{"old-layout", "status", "container_rebuild_required", "保留全部数据", old, 503},

@@ -45,6 +45,10 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, e
 	}
+	if e = migrateOrderEvents(db); e != nil {
+		db.Close()
+		return nil, e
+	}
 	if e = migrateItems(db); e != nil {
 		db.Close()
 		return nil, e
@@ -66,7 +70,7 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, e
 	}
-	if e = migrateAPICredentials(db); e != nil {
+	if e = migrateSourceStatuses(db); e != nil {
 		db.Close()
 		return nil, e
 	}

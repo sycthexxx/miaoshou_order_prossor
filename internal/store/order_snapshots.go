@@ -22,7 +22,7 @@ func saveOrderScope(tx *sql.Tx, account, scope, at string, files, ids []string) 
 
 type orderScopes = orders.Scopes
 
-func loadOrderScopes(db *sql.DB, account string) (orderScopes, error) {
+func loadOrderScopes(db rowsQuerier, account string) (orderScopes, error) {
 	rows, err := db.Query(`SELECT scope,package_ids,captured_at FROM order_scope_snapshots WHERE account_id=?`, account)
 	if err != nil {
 		return nil, err
@@ -44,6 +44,12 @@ func loadOrderScopes(db *sql.DB, account string) (orderScopes, error) {
 		for _, id := range ids {
 			out[scope][id] = true
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := applyEventMembership(db, account, out, times); err != nil {
+		return nil, err
 	}
 	// An order can move between purchase views between two captures.
 	for id := range out["waitPurchase"] {
