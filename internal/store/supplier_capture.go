@@ -13,7 +13,7 @@ var offerNumber = regexp.MustCompile(`^[0-9]{1,40}$`)
 // CaptureSupplier preserves an association only when its supplier name matches.
 // Different names reassign this product without renaming or deleting old suppliers.
 // Capturing source metadata does not acquire or change an employee procurement lease.
-func CaptureSupplier(db *sql.DB, _ int64, account, product, name string) (object, error) {
+func CaptureSupplier(db *sql.DB, _ int64, account, product, name string, contact ...string) (object, error) {
 	name = strings.TrimSpace(name)
 	if !offerNumber.MatchString(product) || name == "" || len([]rune(name)) > 120 {
 		return nil, fmt.Errorf("商品ID或厂家名称不正确")
@@ -65,7 +65,14 @@ func CaptureSupplier(db *sql.DB, _ int64, account, product, name string) (object
 		}
 	}
 	result := object{"productId": product, "assigned": int64(0), "updated": int64(0), "retained": retained, "created": false, "supplierName": name}
+	var chatURL string
+	if len(contact) != 0 {
+		chatURL = contact[0]
+	}
 	if len(missing)+len(changed) == 0 {
+		if e = saveSupplierChat(tx, account, supplier, chatURL); e != nil {
+			return nil, e
+		}
 		if e = tx.Commit(); e != nil {
 			return nil, e
 		}
@@ -109,6 +116,9 @@ func CaptureSupplier(db *sql.DB, _ int64, account, product, name string) (object
 		if e = tx.QueryRow(`SELECT id FROM suppliers WHERE account_id=? AND platform='1688' AND name=?`, account, name).Scan(&supplier); e != nil {
 			return nil, e
 		}
+	}
+	if e = saveSupplierChat(tx, account, supplier, chatURL); e != nil {
+		return nil, e
 	}
 	assigned, updated := int64(0), int64(0)
 	at := time.Now().UTC().Format(time.RFC3339Nano)

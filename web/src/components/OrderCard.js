@@ -4,7 +4,7 @@ import ProductImage from './ProductImage.js';
 export default {
  components:{ProductImage,SearchSelect},
  props:['order','suppliers','sellerMap','sourceKey','saving'],
- emits:['assign','pack'],
+ emits:['assign','pack','track'],
  setup(props,{emit}){
   const editing=ref({});
   const sellerName=source=>props.suppliers.find(s=>s.id===props.sellerMap[props.sourceKey(source)])?.name||'已指定卖家';
@@ -23,7 +23,17 @@ export default {
     wait_receiver_confirm:'已发货',finished:'已完成',returned:'已退款'
    })[order.appPackageStatus]||'未知状态';
   });
-  return {money,date,safe,editing,sellerName,selectSeller,cancelled,statusLabel};
+  const platformStatus=code=>({
+   UNPAID:'未付款',TO_FULFILL:'待发货',PROCESSING:'处理中',FULFILLING:'履约中',
+   COMPLETED:'已完成',CANCELLED:'已取消',SHIPPED:'已发货',DELIVERED:'已送达'
+  })[code]||code||'—';
+  const purchaseStatus=code=>({
+   wait_pay:'待付款',wait_send:'待发货',has_send:'已发货',has_sign:'已签收',cancel:'已取消'
+  })[code]||code||'—';
+  const isTikTok=computed(()=>String(props.order.platform).toLowerCase()==='tiktok');
+  const hasWaybill=value=>!!value&&value!=='0'&&value!=='--';
+  const track=(kind,number,company)=>emit('track',{kind,number,company,packageId:props.order.opOrderPackageId});
+  return {track,hasWaybill,isTikTok,money,date,safe,editing,sellerName,selectSeller,cancelled,statusLabel,platformStatus,purchaseStatus};
  },
  template:`<article class="order-card">
  <header class="order-heading" :class="{'order-heading-cancelled':cancelled}"><strong>[{{order.platformName||order.platform}}<template v-if="order.siteName"> · {{order.siteName}}</template>]</strong><strong>{{order.shopName||order.platformShopName}}</strong><span class="order-number">{{order.platformOrderSn||order.orderInfo?.platformOrderSn}}</span><span class="status-pill" :class="{'status-pill-cancelled':cancelled}">{{statusLabel}}</span><span class="payment">支付途径：{{order.orderInfo?.paymentMethod||'—'}}</span><span class="record-id">本地 #{{order.id}}</span></header>
@@ -35,7 +45,20 @@ export default {
  </div></div>
  <div class="info-column amounts"><dl><div><dt>订单金额</dt><dd>{{money(order.orderPackageAmountDetail?.orderAmount??order.orderInfo?.orderAmount,order.currency)}}<small v-if="order.orderPackageAmountDetail?.CNYOrderAmount!=null">({{money(order.orderPackageAmountDetail.CNYOrderAmount,'CNY')}})</small></dd></div><div><dt>预估回款</dt><dd>{{money(order.orderPackageAmountDetail?.escrowAmount??order.orderInfo?.escrowAmount,order.currency)}}<small v-if="order.orderPackageAmountDetail?.CNYEscrowAmount!=null">({{money(order.orderPackageAmountDetail.CNYEscrowAmount,'CNY')}})</small></dd></div></dl></div>
  <div class="info-column"><dl><div><dt>收件地区</dt><dd>{{order.consigneeInfo?.countryName||order.orderInfo?.buyerCountryName||'—'}}</dd></div><div><dt>姓名</dt><dd>{{order.consigneeInfo?.name||'—'}}</dd></div><div><dt>省州/邮编</dt><dd>{{order.consigneeInfo?.state||'—'}} / {{order.consigneeInfo?.zipcode||'—'}}</dd></div></dl><div class="buyer-message"><span>买家留言</span><p>{{order.orderInfo?.buyerMessage||'无'}}</p></div></div>
- <div class="info-column logistics"><dl><div><dt>包裹号</dt><dd>{{order.appPackageNo||'—'}}</dd></div><div><dt>物流方式</dt><dd>{{order.logisticsAgentProductInfo?.productName||order.logisticsMethod||'—'}}</dd></div><div><dt>运单号</dt><dd>{{order.logisticsNo||'未获取'}}</dd></div><div v-if="order.headLogisticsNo"><dt>头程单号</dt><dd>{{order.headLogisticsNo}}</dd></div></dl><p v-if="order.applyTrackingNoFailReason" class="failure">{{order.applyTrackingNoFailReason}}</p></div>
+ <div class="info-column logistics"><dl><div><dt>包裹号</dt><dd>{{order.appPackageNo||'—'}}</dd></div><div><dt>物流方式</dt><dd>{{order.logisticsAgentProductInfo?.productName||order.logisticsMethod||'—'}}</dd></div><div><dt>平台运单号</dt><dd><button v-if="isTikTok && order.opOrderPackageId && hasWaybill(order.logisticsNo)" class="text-button tracking-link" type="button"
+  @click="track('platform',order.logisticsNo)"> {{order.logisticsNo}}</button><template v-else>{{order.logisticsNo||'未获取'}}</template></dd></div><div v-if="isTikTok"><dt>TikTok 包裹状态</dt><dd>{{platformStatus(order.platformPackageStatus)}}</dd></div><div v-if="order.headLogisticsNo"><dt>头程单号</dt><dd>{{order.headLogisticsNo}}</dd></div></dl><section v-if="order.firstMilePurchases?.length" class="order-first-mile">
+ <strong>国内头程物流</strong>
+ <dl v-for="purchase in order.firstMilePurchases" :key="purchase.id">
+  <div><dt>{{purchase.platform||'采购单'}}</dt><dd>{{purchase.number||'—'}}</dd></div>
+  <div><dt>采购状态</dt><dd>{{purchaseStatus(purchase.status)}}</dd></div>
+  <div v-for="shipment in purchase.shipments" :key="shipment.company+':'+shipment.number"><dt>{{shipment.company||'国内快递'}}</dt><dd><button v-if="order.opOrderPackageId && shipment.traceId && hasWaybill(shipment.number) && shipment.number!==purchase.number"
+    class="text-button tracking-link" type="button" @click="track('domestic',shipment.number,shipment.company)">{{shipment.number}}</button>
+    <template v-else>{{shipment.number===purchase.number?'暂无单号':shipment.number||'暂无单号'}}</template>
+    <small v-if="shipment.tracking" class="tracking-state">{{shipment.tracking.status}}</small></dd></div>
+  <div v-if="!purchase.shipments.length"><dt>国内运单</dt><dd>暂无快递信息</dd></div>
+ </dl>
+ <small v-if="order.firstMileCapturedAt">妙手采集 {{new Date(order.firstMileCapturedAt).toLocaleString()}}</small>
+ </section><p v-if="order.applyTrackingNoFailReason" class="failure">{{order.applyTrackingNoFailReason}}</p></div>
  <div class="info-column times"><dl><div><dt>下单</dt><dd>{{date(order.orderInfo?.gmtOrderStart)}}</dd></div><div><dt>付款</dt><dd>{{date(order.orderInfo?.gmtPay)}}</dd></div><div><dt>发货截止</dt><dd>{{date(order.gmtLastDelivery||order.orderInfo?.gmtLastDelivery)}}</dd></div><div><dt>取消截止</dt><dd>{{date(order.gmtLastCancel)}}</dd></div><div class="capture-time"><dt>本地采集</dt><dd>{{new Date(order.capturedAt).toLocaleString()}}</dd></div></dl></div>
  </div></article>`
 };

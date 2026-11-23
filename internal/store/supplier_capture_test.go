@@ -296,3 +296,25 @@ func TestCaptureSupplierUpdateFailureRollsBackAllSitesAndNewSupplier(t *testing.
 		t.Fatal("original assignment changed after rollback")
 	}
 }
+
+func TestCaptureSupplierSavesChatWithSupplier(t *testing.T) {
+	db, account, other := captureFixture(t)
+	captureProduct(t, db, account, "100", "")
+	link := "https://air.1688.com" + supplierChatPath + "?touid=cnalichn正格服饰厂&siteid=cnalichn&offerId=100"
+	if _, err := CaptureSupplier(db, 1, other, "100", "东莞市正格服饰厂", link); err == nil {
+		t.Fatal("accepted capture for an unrelated account")
+	}
+	if _, err := CaptureSupplier(db, 1, account, "100", "东莞市正格服饰厂", "https://example.com/"); err == nil || captureCount(t, db, "suppliers") != 0 {
+		t.Fatal("invalid link should roll back the capture")
+	}
+	if _, err := CaptureSupplier(db, 1, account, "100", "东莞市正格服饰厂", link); err != nil {
+		t.Fatal(err)
+	}
+	factories := []*shippedFactory{{Name: "正格服饰厂", has1688: true}, {Name: "其他厂家", has1688: true}}
+	if err := shippedSupplierContacts(db, account, factories); err != nil {
+		t.Fatal(err)
+	}
+	if factories[0].ChatURL == "" || factories[1].ChatURL != "" || captureCount(t, db, "suppliers") != 1 {
+		t.Fatalf("unexpected links: %q, %q", factories[0].ChatURL, factories[1].ChatURL)
+	}
+}

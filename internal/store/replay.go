@@ -25,12 +25,12 @@ func ReplayArchives(db *sql.DB, dir string, decoder orders.ArchiveDecoder) (int,
 		}
 		for _, file := range files {
 			name := filepath.Base(file)
-			var n int
-			err = db.QueryRow("SELECT 1 FROM imported_archives WHERE account_id=? AND file=? AND parser_version=3", account.ID, name).Scan(&n)
-			if err == nil {
+			var version int
+			err = db.QueryRow("SELECT parser_version FROM imported_archives WHERE account_id=? AND file=?", account.ID, name).Scan(&version)
+			if err == nil && version >= 6 {
 				continue
 			}
-			if err != sql.ErrNoRows {
+			if err != nil && err != sql.ErrNoRows {
 				return count, err
 			}
 			raw, err := os.ReadFile(file)
@@ -42,6 +42,13 @@ func ReplayArchives(db *sql.DB, dir string, decoder orders.ArchiveDecoder) (int,
 				return count, err
 			}
 			if archive == nil {
+				continue
+			}
+			// Versions 4–6 add outbound fields. Other previously imported records need no rewrite.
+			if version >= 3 && archive.Kind != orders.Outbound {
+				if _, err = db.Exec("UPDATE imported_archives SET parser_version=6 WHERE account_id=? AND file=?", account.ID, name); err != nil {
+					return count, err
+				}
 				continue
 			}
 			if err = importArchive(db, account.ID, name, *archive); err != nil {
@@ -95,7 +102,7 @@ func importArchive(db *sql.DB, account, file string, archive orders.Archive) err
 			return err
 		}
 	}
-	_, err = tx.Exec("INSERT INTO imported_archives(account_id,file,parser_version) VALUES(?,?,3) ON CONFLICT(account_id,file) DO UPDATE SET parser_version=3", account, file)
+	_, err = tx.Exec("INSERT INTO imported_archives(account_id,file,parser_version) VALUES(?,?,6) ON CONFLICT(account_id,file) DO UPDATE SET parser_version=6", account, file)
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,7 @@ import {ref,inject,watch,onMounted,onUnmounted} from 'vue/dist/vue.esm-bundler.j
 
 export default {
  props:['accounts','api'],
- emits:['orders-changed'],
+ emits:['orders-changed','order-data-changed'],
  setup(props,{emit}){
   const notices=ref([]);
   const noticeHost=inject('order-notice-host',ref(null));
@@ -85,6 +85,12 @@ export default {
      if(!Number.isSafeInteger(result.cursor)||!Array.isArray(result.events))return;
      const fresh=result.events.filter(event=>event.id>(feed.cursor??0));
      feed.cursor=result.cursor;
+     if(typeof result.orderDataRevision==='string'){
+      if(feed.orderDataRevision!==result.orderDataRevision&&(result.orderDataRevision||feed.orderDataRevision)){
+       emit('order-data-changed',account.id);
+      }
+      feed.orderDataRevision=result.orderDataRevision;
+     }
      if(fresh.length)announceChanges(props.accounts.find(a=>a.id===account.id)||account,fresh);
     };
     socket.onclose=()=>{

@@ -81,6 +81,8 @@ func NewWithRuntimeContext(ctx context.Context, db *sql.DB, dir string, runtime 
 	})
 	g := &browserGateway{db: db, runtime: runtime, client: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
 	registerUserAdmin(mux, db)
+	registerFirstMile(mux, db, dir, g)
+	registerTrackingRules(mux, db)
 	registerSupplierLocks(mux, db)
 	mux.HandleFunc("DELETE /api/accounts/{id}", g.removeAccount)
 	packingJobRoutes(ctx, mux, g)
@@ -89,6 +91,7 @@ func NewWithRuntimeContext(ctx context.Context, db *sql.DB, dir string, runtime 
 	mux.HandleFunc("GET /api/accounts/{id}/logistics-company", g.logisticsCompany)
 	mux.HandleFunc("GET /api/accounts/{id}/purchase-info", g.purchaseInfo)
 	mux.HandleFunc("GET /api/accounts/{id}/packages/{package}/amount-detail", g.amountDetail)
+	mux.HandleFunc("GET /api/accounts/{id}/packages/{package}/tracking", g.tracking)
 	mux.HandleFunc("GET /desktop/{id}/{path...}", g.desktop)
 	mux.HandleFunc("POST /api/accounts/{id}/login", proxy("login"))
 	mux.HandleFunc("POST /api/accounts/{id}/restart-container", proxy("restart-container"))
@@ -117,9 +120,10 @@ func NewWithRuntimeContext(ctx context.Context, db *sql.DB, dir string, runtime 
 	mux.HandleFunc("POST /api/accounts/{id}/stop-sync", proxy("stop-sync"))
 	cache := procurementRoutes(mux, db)
 	notifications := &orderEventNotifications{}
+	registerTrackingSchedule(ctx, mux, dir, g, notifications)
 	orderEventRoutes(ctx, mux, db, dir, cache, notifications)
 	sourceStatusRoutes(mux, db, cache)
-	supplierRoutes(mux, db, cache)
+	supplierRoutes(mux, db, cache, notifications)
 	mux.HandleFunc("GET /api/accounts/{id}/archives", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if !store.Exists(db, id) {
@@ -153,6 +157,14 @@ func NewWithRuntimeContext(ctx context.Context, db *sql.DB, dir string, runtime 
 		send(w, 200, out)
 	})
 
+	mux.HandleFunc("GET /api/accounts/{id}/shipped-summary", func(w http.ResponseWriter, r *http.Request) {
+		groups, err := store.ShippedSummary(db, r.PathValue("id"))
+		if err != nil {
+			send(w, 500, map[string]string{"error": "读取已出货汇总失败"})
+			return
+		}
+		send(w, 200, groups)
+	})
 	mux.HandleFunc("GET /api/accounts/{id}/orders", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if !store.Exists(db, id) {

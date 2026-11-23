@@ -143,3 +143,50 @@ func TestRepeatedOrderUpdatesPreserveIDs(t *testing.T) {
 		t.Fatal(archives)
 	}
 }
+
+func TestReplayOrderLogistics(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(filepath.Join(dir, "orders.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	account, err := Create(db, "logistics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := StorageKey(db, account)
+	rawDir := filepath.Join(dir, "raw", key)
+	if err = os.MkdirAll(rawDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(file, endpoint, at, body string) {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{"accountId": key, "endpoint": endpoint, "status": 200, "capturedAt": at, "bodyBase64": base64.StdEncoding.EncodeToString([]byte(body))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(rawDir, file), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("1.json", listEndpoint, "2026-11-23T00:00:00Z", `{"result":"success","packageList":[{"opOrderPackageId":"7","platform":"tiktok","platformPackageStatus":"FULFILLING","logisticsNo":"DCS123","items":[]}]}`)
+	write("2.json", outboundEndpoint, "2026-11-23T02:00:00Z", `{"result":"success","opOrderPackageIdAndOutboundInfoMap":{"7":{"opOrderPackageId":"7","items":{"55":{"opOrderItemId":"55","purchaseOrderId":"98","relatePurchaseOrderIds":["98"]}},"purchaseOrders":{"98":{"purchaseOrderId":"98","purchaseOrderSn":"5127948757295409109","purchasePlatformName":"1688","purchaseOrderStatus":"has_sign","purchaseOrderPackages":{"1":{"purchaseOrderLogisticsName":"中通快递","purchaseOrderWaybillCode":"79050020721591"},"2":{"purchaseOrderLogisticsName":"顺丰","purchaseOrderWaybillCode":"123456"}}},"99":{"purchaseOrderId":"99","isUnrelated":"1"}}}}}`)
+	write("3.json", outboundEndpoint, "2026-11-23T01:00:00Z", `{"result":"success","opOrderPackageIdAndOutboundInfoMap":{"7":{"opOrderPackageId":"7","purchaseOrders":{}}}}`)
+	if _, err = Replay(db, dir); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Orders(db, account, "", 1, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := result["items"].([]object)[0]
+	var purchases []firstMilePurchase
+	if err = json.Unmarshal(row["firstMilePurchases"].(json.RawMessage), &purchases); err != nil {
+		t.Fatal(err)
+	}
+	if row["platformPackageStatus"] != "FULFILLING" || row["logisticsNo"] != "DCS123" || len(purchases) != 1 || purchases[0].Status != "has_sign" || len(purchases[0].Shipments) != 2 ||
+		len(purchases[0].ItemIDs) != 1 || purchases[0].ItemIDs[0] != "55" {
+		t.Fatal(row, purchases)
+	}
+}

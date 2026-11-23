@@ -509,3 +509,222 @@ select.task-status-select:open {
   color: #8f4654;
   border-color: #efc5cb;
 }
+
+.order-first-mile { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); }
+.order-first-mile dl + dl { margin-top: 8px; }
+.order-first-mile dd { overflow-wrap: anywhere; }
+
+.tracking-link {
+  padding: 0;
+  text-align: start;
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.tracking-dialog {
+  width: min(560px, calc(100% - 28px));
+  max-height: 85dvh;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid #d4e2e6;
+  border-radius: 14px;
+  color: #20343e;
+  background: #fff;
+}
+
+.tracking-dialog::backdrop { background: rgb(22 46 58 / 42%); }
+.tracking-dialog header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #dce7ea;
+  background: #fff;
+}
+
+.tracking-dialog h2 { margin: 0; font-size: 1.15rem; }
+.tracking-content { padding: 16px 20px 20px; }
+.tracking-waybill {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #edf6f5;
+  overflow-wrap: anywhere;
+}
+
+.tracking-timeline { padding: 0 0 0 10px; margin: 0; list-style: none; }
+.tracking-timeline li { position: relative; padding: 0 0 18px 18px; border-left: 2px solid #dce7ea; }
+.tracking-timeline li:last-child { padding-bottom: 0; }
+.tracking-timeline li::before {
+  content: '';
+  position: absolute;
+  inset: 4px auto auto -6px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: #839ba3;
+}
+.tracking-timeline li:first-child::before { background: #078d90; }
+.tracking-timeline time, .tracking-timeline small { display: block; color: #506977; }
+.tracking-timeline p, .tracking-timeline small { margin: 4px 0 0; white-space: pre-wrap; }
+
+.shipped-summary-toolbar > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; }
+.shipped-status-filter { gap: 8px; min-width: 0; }
+.shipped-status-filter select { max-width: min(13rem, 38vw); }
+.shipped-summary-count { color: #526b78; }
+.shipped-factory { margin: 16px 0; border: 1px solid #d9e5e6; border-radius: 12px; overflow: hidden; background: #fff; }
+.shipped-factory > header {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px;
+  padding: 14px 16px; background: #eaf5f4; color: #315b62;
+}
+.shipped-supplier-chat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-inline-start: auto;
+  padding: 5px 9px;
+  border: 1px solid #eddace;
+  border-radius: 7px;
+  background: #fff8f2;
+  color: #984817;
+  font-size: .85rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+.shipped-supplier-chat:hover { background: #ffeddc; color: #74350e; }
+.shipped-factory h2 { margin: 0; font-size: 1.05rem; color: #213640; }
+.missing-waybill { color: #a72f41; background: #fbe9eb; border-radius: 6px; padding: 3px 8px; font-size: .9rem; }
+.shipped-group { border-top: 1px solid #e4edef; }
+.shipped-group > summary { cursor: pointer; padding: 13px 16px; overflow-wrap: anywhere; }
+.shipped-group > summary > span, .shipped-group > summary > strong { margin-inline-end: 12px; }
+.shipped-waybill { vertical-align: baseline; }
+.shipped-group[open] > summary { background: #f5f9f9; }
+.shipped-number { font-weight: 600; }
+.shipped-offer-link { display: inline-block; margin-inline-end: 12px; font-size: .85rem; }
+.shipped-order-count { color: #506977; white-space: nowrap; }
+.shipped-orders { list-style: none; margin: 0; padding: 0 16px; }
+.shipped-orders > li { padding: 12px 0; }
+.shipped-orders > li + li { border-top: 1px solid #e7eef0; }
+.shipped-order-heading { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-bottom: 7px; overflow-wrap: anywhere; }
+.shipped-order-heading > span, .shipped-sku small { color: #526b78; }
+.shipped-sku { margin-top: 7px; overflow-wrap: anywhere; }
+.shipped-sku > div:nth-child(2) { flex: 1; min-width: 0; }
+.shipped-sku small { display: block; }
+.shipped-quantity { white-space: nowrap; }
+
+.tracking-state {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #edf6f5;
+  color: #235f61;
+  font-size: .85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.shipped-group .tracking-state {
+  background: #edf0f3;
+  color: #465563;
+}
+.shipped-group .tracking-state[data-status="已揽收"] {
+  background: #fff1d9;
+  color: #855004;
+}
+.shipped-group .tracking-state[data-status="运输中"] {
+  background: #e7f0ff;
+  color: #254f91;
+}
+.shipped-group .tracking-state:is([data-status="已送达"], [data-status="已签收"]) {
+  background: #e1f4e9;
+  color: #186447;
+}
+
+.domestic-tracking-rules { margin: 14px 0; }
+.domestic-tracking-rules > summary { cursor: pointer; color: #235f61; font-weight: 600; }
+.domestic-tracking-rules > form { display: grid; gap: 12px; }
+.domestic-tracking-rules fieldset {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  align-items: start;
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #d9e5e6;
+  border-radius: 8px;
+}
+.domestic-tracking-rules fieldset label { display: grid; gap: 5px; }
+.domestic-tracking-rules textarea { width: 100%; resize: vertical; }
+.tracking-rule-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.accounts-view { max-width: 1120px; }
+.accounts-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 16px;
+  padding: 5px;
+  border: 1px solid #dce7e9;
+  border-radius: 10px;
+  background: #fff;
+}
+.accounts-subnav a {
+  display: block;
+  padding: 9px 14px;
+  border-radius: 6px;
+  color: #465d69;
+  font-weight: 600;
+  text-decoration: none;
+}
+.accounts-subnav a:hover { background: #f0f7f7; color: #086e71; }
+.accounts-subnav a[aria-current="page"] { background: #e2f3f1; color: #086e71; }
+.accounts-panel-heading { margin-bottom: 18px; }
+.accounts-panel-heading h2 { margin: 0; font-size: 1.25rem; }
+.accounts-panel-heading p { margin: 6px 0 0; color: var(--muted); }
+.account-add-form, .account-plugin-form { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
+.account-add-form input { flex: 1 1 200px; max-width: 380px; min-width: 0; }
+.accounts-list, .accounts-detail-list { display: grid; gap: 12px; }
+.accounts-list { margin-top: 18px; }
+.account-card { min-width: 0; padding: 16px; border: 1px solid #dce7ea; border-radius: 9px; }
+.account-card-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.account-card-header .account-avatar { flex: 0 0 40px; width: 40px; height: 40px; }
+.account-card-identity { flex: 1 1 100px; min-width: 0; }
+.account-card-identity h3 { margin: 0; overflow-wrap: anywhere; font-size: 1.05rem; }
+.account-card-identity small, .account-mode { color: #647984; font-size: .85rem; font-weight: 400; }
+.account-verification { margin: 8px 0 0; }
+.account-main-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.account-desktop-link { padding: 7px 10px; border-radius: 6px; color: #086e71; background: #eef7f6; }
+.account-more { margin-top: 12px; padding-top: 10px; border-top: 1px solid #e5edef; }
+.account-more > summary { cursor: pointer; color: #4d6571; width: fit-content; }
+.account-more .account-delete { color: #a73543; }
+.accounts-detail-list > details { padding: 14px; }
+.accounts-detail-list > details > summary { cursor: pointer; font-weight: 600; }
+.account-plugin-form label:first-child { display: grid; gap: 5px; }
+.account-plugin-form .account-gifts { align-self: center; white-space: nowrap; }
+.accounts-view .accounts-empty { padding: 24px 12px; }
+@media (max-width: 640px) {
+  .accounts-panel { padding: 14px; }
+  .accounts-subnav a { padding: 7px 10px; }
+}
+
+.shipped-group .shipped-sync-time {
+  margin-inline-start: 6px;
+  color: #526b78;
+  white-space: nowrap;
+  font-weight: 400;
+}
+.domestic-tracking-sync fieldset {
+  grid-template-columns: repeat(2, minmax(0, 8rem));
+  justify-content: start;
+}

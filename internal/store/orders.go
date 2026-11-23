@@ -59,15 +59,18 @@ CREATE TABLE IF NOT EXISTS imported_archives(id INTEGER PRIMARY KEY AUTOINCREMEN
 
 func Orders(db rowsQuerier, account, query string, page, size int, statuses ...string) (object, error) {
 	// A bounded page is returned; source snapshots stay in SQLite for reprocessing.
-	rows, e := db.Query("SELECT id,package_id,payload,captured_at,source_file FROM packages WHERE account_id=? ORDER BY captured_at DESC,package_id DESC", account)
+	rows, e := db.Query(`SELECT p.id,p.package_id,p.payload,p.captured_at,p.source_file,
+ COALESCE(l.purchases,'[]'),COALESCE(l.captured_at,'')
+ FROM packages p LEFT JOIN package_purchase_logistics l ON l.account_id=p.account_id AND l.package_id=p.package_id
+ WHERE p.account_id=? ORDER BY p.captured_at DESC,p.package_id DESC`, account)
 	if e != nil {
 		return nil, e
 	}
 	all := []object{}
 	for rows.Next() {
-		var id, payload, at, file string
+		var id, payload, at, file, purchases, logisticsAt string
 		var localID int64
-		if e = rows.Scan(&localID, &id, &payload, &at, &file); e != nil {
+		if e = rows.Scan(&localID, &id, &payload, &at, &file, &purchases, &logisticsAt); e != nil {
 			rows.Close()
 			return nil, e
 		}
@@ -81,6 +84,8 @@ func Orders(db rowsQuerier, account, query string, page, size int, statuses ...s
 		p["items"] = items
 		p["capturedAt"] = at
 		p["sourceFile"] = file
+		p["firstMilePurchases"] = json.RawMessage(purchases)
+		p["firstMileCapturedAt"] = logisticsAt
 		all = append(all, p)
 	}
 	e = rows.Err()
@@ -180,6 +185,21 @@ func Orders(db rowsQuerier, account, query string, page, size int, statuses ...s
 	end := start + size
 	if end > total {
 		end = total
+	}
+	if start < end {
+		states, err := domesticTrackingStates(db, account)
+		if err != nil {
+			return nil, err
+		}
+		if len(states) > 0 {
+			for _, order := range filtered[start:end] {
+				purchases, err := withDomesticTracking(order["firstMilePurchases"].(json.RawMessage), states)
+				if err != nil {
+					return nil, err
+				}
+				order["firstMilePurchases"] = purchases
+			}
+		}
 	}
 	return object{"items": filtered[start:end], "total": total, "page": page, "pageSize": size, "counts": counts, "status": status, "purchaseTab": purchase}, nil
 }

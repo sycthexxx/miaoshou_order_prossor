@@ -8,7 +8,7 @@ import (
 	"order_processor/internal/store"
 )
 
-func supplierRoutes(mux *http.ServeMux, db *sql.DB, caches ...*procurementCache) {
+func supplierRoutes(mux *http.ServeMux, db *sql.DB, cache *procurementCache, notifications *orderEventNotifications) {
 	mux.HandleFunc("POST /api/accounts/{id}/source-supplier/capture", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if !store.Exists(db, id) {
@@ -18,19 +18,25 @@ func supplierRoutes(mux *http.ServeMux, db *sql.DB, caches ...*procurementCache)
 		var in struct {
 			ProductID string `json:"productId"`
 			Name      string `json:"name"`
+			ChatURL   string `json:"chatUrl"`
 		}
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in) != nil {
 			send(w, 400, map[string]string{"error": "请求格式错误"})
 			return
 		}
-		result, e := store.CaptureSupplier(db, currentUser(r).ID, id, in.ProductID, in.Name)
+		result, e := store.CaptureSupplier(db, currentUser(r).ID, id, in.ProductID, in.Name, in.ChatURL)
 		if e != nil {
 			send(w, http.StatusBadRequest, map[string]string{"error": e.Error()})
 			return
 		}
-		if result["assigned"].(int64)+result["updated"].(int64) > 0 && len(caches) > 0 {
+		changed := result["assigned"].(int64)+result["updated"].(int64) > 0
+		// A chat-only capture changes the shipped summary even when the supplier mapping is unchanged.
+		if notifications != nil && (changed || in.ChatURL != "") {
+			notifications.publishOrderData(id)
+		}
+		if changed && cache != nil {
 			result["cacheRefreshed"] = true
-			if err := caches[0].refreshAccount(id); err != nil {
+			if err := cache.refreshAccount(id); err != nil {
 				// Association committed successfully; a retry would not fix a
 				// failed summary query, so preserve the successful result.
 				result["cacheRefreshed"] = false

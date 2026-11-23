@@ -59,3 +59,46 @@ test('saved supplier reports cache refresh warning as success text without reque
  const text=OPSupplier.supplierResultText({assigned:1,updated:0,retained:0,created:false,supplierName:'甲厂',cacheRefreshed:false,cacheRefreshError:'refresh failed'});
  assert.match(text,/厂家已保存，汇总刷新失败/);assert.match(text,/工作台刷新采购汇总/);assert.doesNotMatch(text,/回传厂家.*重试/);
 });
+
+test('capture only an explicit web chat link from the current seller and strip extra parameters',()=>{
+ const company=el('正格服饰厂');
+ const path='https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html';
+ const href=path+'?touid=cnalichnabc&siteid=cnalichn&offerId=100#ignored';
+ const anchor=href=>({getAttribute:()=>href});
+ const shop=anchor('https://shop123.1688.com/');
+ const scope={querySelectorAll:()=>[shop,anchor(href),anchor(href.replace('air.1688.com','air.1688.com.invalid'))]};
+ company.closest=selector=>selector.startsWith('[data-current-supplier]')?scope:null;
+ const page=doc({'.company-name':[company]});
+ assert.equal(OPSupplier.supplierReading(page,'100').chatUrl,path+'?touid=cnalichnabc&siteid=cnalichn&status=1');
+ scope.querySelectorAll=()=>[shop,anchor(href),anchor(href.replace('cnalichnabc','cnalichnother'))];
+ assert.equal(OPSupplier.supplierReading(page,'100').chatUrl,'');
+});
+
+test('shop header provides the seller chat target through the customer service button',()=>{
+ const company=el('东莞市虎门正格服饰厂');
+ const button=el('客服',{'data-touid':'cnalichn正格服饰厂'});
+ const header={tagName:'DIV',textContent:'东莞市虎门正格服饰厂关注客服商品',
+  querySelectorAll:selector=>selector.includes('button')?[el('关注'),button,el('商品')]:[]};
+ company.parentElement=header;
+ const result=OPSupplier.supplierReading(doc({'.company-name':[company]}),'100');
+ assert.equal(result.automaticName,'东莞市虎门正格服饰厂');
+ assert.equal(new URL(result.chatUrl).searchParams.get('touid'),'cnalichn正格服饰厂');
+});
+
+test('the SHOP_CREDIT link identifies the company but is not a chat URL',()=>{
+ const company=el('揭阳市揭东区新亨镇良晨服装厂');
+ const shop={getAttribute:()=> 'https://shop23081902a52a8.1688.com?offerId=1039397478773'};
+ const header={querySelectorAll:selector=>selector==='a[href]'?[shop]:[]};
+ company.getBoundingClientRect=()=>({left:30,top:55});
+ company.closest=selector=>selector.startsWith('header,')?header:null;
+ const reading=OPSupplier.supplierReading(doc({'a[data-trace="SHOP_CREDIT"][href] h1':[company]}),'1039397478773');
+ assert.equal(reading.automaticName,'揭阳市揭东区新亨镇良晨服装厂');
+ assert.equal(reading.chatUrl,'');
+});
+
+test('a pasted address must identify a seller on the 1688 chat page',()=>{
+ const page='https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html';
+ assert.equal(OPSupplier.chatURL('https://detail.1688.com/offer/984933052528.html'),'');
+ assert.equal(OPSupplier.chatURL(page+'?siteid=cnalichn'),'');
+ assert.equal(OPSupplier.chatURL(page+'?siteid=cnalichn&touid=cnalichnabc&tracking=1'),page+'?touid=cnalichnabc&siteid=cnalichn&status=1');
+});

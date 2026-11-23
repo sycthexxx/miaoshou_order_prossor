@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "内部采购助手",
-  "version": "0.1.15",
+  "version": "0.1.22",
   "description": "从订单工作台带入货源采购需求，人工选规格时核对数量。不会自动下单。",
   "minimum_chrome_version": "120",
   "permissions": [
     "storage",
     "scripting",
-    "activeTab"
+    "activeTab",
+    "webNavigation"
   ],
   "host_permissions": [
     "http://127.0.0.1/*",

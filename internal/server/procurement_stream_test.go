@@ -59,7 +59,7 @@ func TestCaptureRebuildsWholeSnapshotsOnlyOnChange(t *testing.T) {
 	takeSnapshot(t, gift)
 	takeSnapshot(t, foreign)
 	mux := http.NewServeMux()
-	supplierRoutes(mux, db, cache)
+	supplierRoutes(mux, db, cache, nil)
 	capture := func(name string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "/api/accounts/"+account+"/source-supplier/capture", strings.NewReader(`{"productId":"100","name":"`+name+`"}`))
 		w := httptest.NewRecorder()
@@ -211,5 +211,67 @@ func TestProcurementWebSocketAuthenticationAndCompleteSnapshot(t *testing.T) {
 	cache.get(account, true, true)
 	if _, _, err = conn.Read(ctx); err == nil {
 		t.Fatal("revoked session received snapshot")
+	}
+}
+
+func TestSupplierChatCaptureRefreshesShippedSummaryOverAccountStream(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	account, err := store.Create(db, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO shop_products(account_id,platform,shop_id,platform_item_id,payload,captured_at,source_file)
+		VALUES(?,'tiktok','s','p','{"sourceList":[{"source":"1688","sourceItemId":"100"}]}','2026','fixture');
+		INSERT INTO packages(account_id,package_id,payload,captured_at,source_file)
+		VALUES(?,'pkg','{"opOrderPackageId":"pkg","platform":"tiktok","shopId":"s","appPackageStatus":"wait_seller_send","appPackageOperateStatus":"wait_process","appPurchaseStatus":"1","items":[{"opOrderItemId":"item","platformItemId":"p"}]}','2026','fixture')`, account, account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CaptureSupplier(db, 1, account, "100", "厂家A"); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewWithRuntimeContext(nil, db, dir, fixedRuntime{}, "")
+	cookie := adminSession(t, handler)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	base := "/api/accounts/" + account
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+base+"/order-events/ws",
+		&websocket.DialOptions{HTTPHeader: http.Header{"Cookie": {cookie.String()}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	readRevision := func() string {
+		t.Helper()
+		_, raw, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var message struct {
+			OrderDataRevision string
+		}
+		if err := json.Unmarshal(raw, &message); err != nil {
+			t.Fatal(err)
+		}
+		return message.OrderDataRevision
+	}
+	before := readRevision()
+	w := authRequest(handler, cookie, "POST", base+"/source-supplier/capture",
+		`{"productId":"100","name":"厂家A","chatUrl":"https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html?siteid=cnalichn&touid=cnalichnshop"}`)
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if after := readRevision(); after == "" || after == before {
+		t.Fatal("chat-only update did not invalidate the shipped summary")
+	}
+	summary := authRequest(handler, cookie, "GET", base+"/shipped-summary", "")
+	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"chatUrl":"https://air.1688.com/`) {
+		t.Fatal(summary.Code, summary.Body.String())
 	}
 }

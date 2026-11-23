@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	ListEndpoint        = "/api/order/package/render_list/searchOrderPackageList"
-	TranslationEndpoint = "/api/order/package/getTranslatedOpOrderPackageList"
-	ProductEndpoint     = "/api/platform/tiktok/item/item/searchItemList"
-	OutboundEndpoint    = "/api/order/package/getOpOrderPackageIdAndOutboundInfoMap"
+	ListEndpoint           = "/api/order/package/render_list/searchOrderPackageList"
+	TranslationEndpoint    = "/api/order/package/getTranslatedOpOrderPackageList"
+	ProductEndpoint        = "/api/platform/tiktok/item/item/searchItemList"
+	OutboundEndpoint       = "/api/order/package/render_list/getOpOrderPackageIdAndOutboundInfoMap"
+	legacyOutboundEndpoint = "/api/order/package/getOpOrderPackageIdAndOutboundInfoMap"
 )
 
 type Decoder struct{}
@@ -36,7 +37,7 @@ func parse(raw []byte, key string) (*envelope, orders.Fields, error) {
 		return nil, nil, err
 	}
 	switch env.Endpoint {
-	case ListEndpoint, TranslationEndpoint, ProductEndpoint, OutboundEndpoint:
+	case ListEndpoint, TranslationEndpoint, ProductEndpoint, OutboundEndpoint, legacyOutboundEndpoint:
 	default:
 		return nil, nil, nil
 	}
@@ -61,7 +62,7 @@ func (Decoder) DecodeArchive(raw []byte, key, file string) (*orders.Archive, err
 	if err != nil || env == nil {
 		return nil, err
 	}
-	kinds := map[string]orders.Kind{ListEndpoint: orders.Packages, TranslationEndpoint: orders.Translations, ProductEndpoint: orders.Products, OutboundEndpoint: orders.Outbound}
+	kinds := map[string]orders.Kind{ListEndpoint: orders.Packages, TranslationEndpoint: orders.Translations, ProductEndpoint: orders.Products, OutboundEndpoint: orders.Outbound, legacyOutboundEndpoint: orders.Outbound}
 	result := &orders.Archive{Source: "web", Kind: kinds[env.Endpoint], CapturedAt: env.CapturedAt}
 	listKey := "packageList"
 	if result.Kind == orders.Products {

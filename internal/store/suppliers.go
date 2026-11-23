@@ -11,7 +11,8 @@ import (
 func migrateSuppliers(db *sql.DB) error {
 	_, e := db.Exec(`CREATE TABLE IF NOT EXISTS suppliers(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,platform TEXT NOT NULL,name TEXT NOT NULL,UNIQUE(account_id,platform,name));
  CREATE TABLE IF NOT EXISTS supplier_evidence(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,package_id TEXT NOT NULL,purchase_id TEXT NOT NULL,supplier_id INTEGER NOT NULL REFERENCES suppliers(id),order_no TEXT NOT NULL,purchase_no TEXT NOT NULL,captured_at TEXT NOT NULL,source_file TEXT NOT NULL,UNIQUE(account_id,package_id,purchase_id));
- CREATE TABLE IF NOT EXISTS source_suppliers(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,source TEXT NOT NULL,site TEXT NOT NULL,product_id TEXT NOT NULL,supplier_id INTEGER NOT NULL REFERENCES suppliers(id),updated_at TEXT NOT NULL,UNIQUE(account_id,source,site,product_id));`)
+ CREATE TABLE IF NOT EXISTS source_suppliers(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,source TEXT NOT NULL,site TEXT NOT NULL,product_id TEXT NOT NULL,supplier_id INTEGER NOT NULL REFERENCES suppliers(id),updated_at TEXT NOT NULL,UNIQUE(account_id,source,site,product_id));
+ CREATE TABLE IF NOT EXISTS supplier_chat_links(account_id INTEGER NOT NULL,supplier_id INTEGER NOT NULL REFERENCES suppliers(id),chat_url TEXT NOT NULL,seller_nick TEXT NOT NULL,PRIMARY KEY(account_id,supplier_id));`)
 	return e
 }
 
@@ -22,7 +23,13 @@ func saveOutbound(tx *sql.Tx, account, at, file string, p object) error {
 	if packageID == "" {
 		return fmt.Errorf("missing outbound package id")
 	}
-	for _, purchase := range objects(p["purchaseOrders"]) {
+	purchases := objects(p["purchaseOrders"])
+	if _, present := p["purchaseOrders"]; present {
+		if err := savePurchaseLogistics(tx, account, packageID, at, purchases, append(objects(p["items"]), objects(p["giftItems"])...)); err != nil {
+			return err
+		}
+	}
+	for _, purchase := range purchases {
 		name := strings.TrimSpace(text(purchase["purchaseOrderSeller"]))
 		platform := text(purchase["purchasePlatform"])
 		id := text(purchase["purchaseOrderId"])
@@ -149,10 +156,10 @@ func AssignSupplier(db *sql.DB, userID int64, account, source, site, product str
 	return tx.Commit()
 }
 
-func attachSuppliers(db rowsQuerier, account string, report object) error {
+func sourceSuppliers(db rowsQuerier, account string) (map[string]object, error) {
 	rows, e := db.Query(`SELECT m.source,m.site,m.product_id,s.id,s.name,s.platform FROM source_suppliers m JOIN suppliers s ON s.id=m.supplier_id AND s.account_id=m.account_id WHERE m.account_id=?`, account)
 	if e != nil {
-		return e
+		return nil, e
 	}
 	defer rows.Close()
 	bySource := map[string]object{}
@@ -160,12 +167,20 @@ func attachSuppliers(db rowsQuerier, account string, report object) error {
 		var source, site, product, name, platform string
 		var id int64
 		if e = rows.Scan(&source, &site, &product, &id, &name, &platform); e != nil {
-			return e
+			return nil, e
 		}
 		key, _ := json.Marshal([]string{source, site, product})
 		bySource["source:"+string(key)] = object{"id": id, "name": name, "platform": platform}
 	}
 	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	return bySource, nil
+}
+
+func attachSuppliers(db rowsQuerier, account string, report object) error {
+	bySource, e := sourceSuppliers(db, account)
+	if e != nil {
 		return e
 	}
 	for _, g := range report["groups"].([]object) {

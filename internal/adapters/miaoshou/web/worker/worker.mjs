@@ -13,7 +13,9 @@ import {requestWaybill} from './waybill.mjs';
 import {lookupLogisticsCompany} from './logistics-company.mjs';
 import {lookupPurchase} from './purchase-lookup.mjs';
 import {getAmountDetail} from './amount-detail.mjs';
+import {getTracking} from './tracking.mjs';
 import {attachOrderEvents} from './order-events.mjs';
+import {startFirstMileSync} from './first-mile.mjs';
 const root=process.env.ORDER_DATA_DIR, accountKey=process.env.ORDER_ACCOUNT_KEY;
 const tokenFile=process.env.BROWSER_TOKEN_FILE;
 if(!root||!accountKey||!tokenFile)throw new Error('请通过工作台启动账户浏览器容器');
@@ -32,10 +34,16 @@ async function login(id){
  if(!s.sync)s.sync=await readJob(root,id);
  const profile=path.join(root,'profiles',id);await mkdir(profile,{recursive:true,mode:0o700});
  try{
-  s.context=await chromium.launchPersistentContext(profile,{headless:false,viewport:null,acceptDownloads:false});
+  const options={headless:false,viewport:null,acceptDownloads:false};
+  const extension=process.env.ORDER_BROWSER_EXTENSION_DIR;
+  if(extension){
+   options.ignoreDefaultArgs=['--disable-extensions'];
+   options.args=[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`];
+  }
+  s.context=await chromium.launchPersistentContext(profile,options);
   s.state='waiting_login';
   try{s.orderEvents=await attachOrderEvents(root,id,s)}catch{console.error('[订单消息] 待处理队列无法打开，常规订单同步仍可使用')}
-  s.context.on('close',()=>{s.state='closed';s.context=null;s.eventsStopping=s.orderEvents?.stop().catch(()=>console.error('[订单消息] 关闭队列失败'))});
+  s.context.on('close',()=>{s.state='closed';s.context=null;s.firstMile?.stop();s.eventsStopping=s.orderEvents?.stop().catch(()=>console.error('[订单消息] 关闭队列失败'))});
   s.context.on('response',response=>{
    const job=(async()=>{
     const u=new URL(response.url());if(u.origin!=='https://erp.91miaoshou.com'||!endpoints.has(u.pathname)||s.orderEvents?.handles(response))return;
@@ -55,6 +63,7 @@ async function login(id){
   const page=s.context.pages()[0]||await s.context.newPage();
   page.on('framenavigated',frame=>{if(frame===page.mainFrame()&&/login|signin/i.test(frame.url())){s.state='waiting_login';s.lastVerifiedAt=null}});
   await page.goto(orderURL,{waitUntil:'domcontentloaded',timeout:45000});
+  if(extension)s.firstMile=startFirstMileSync(s,path.join(root,'runtime',id));
   return view(s);
  }catch(e){s.error=String(e.message).split('\n')[0];s.state=s.context?'waiting_login':'closed';return view(s)}
 }
@@ -62,11 +71,24 @@ const server=http.createServer(async(req,res)=>{
  res.setHeader('Content-Type','application/json');
  const reply=(status,data)=>{res.writeHead(status);res.end(JSON.stringify(data))};
  if(req.headers.authorization!=='Bearer '+token)return reply(403,{error:'禁止访问'});
- const match=req.url.match(/^\/accounts\/([a-f0-9]{32}|[1-9][0-9]*)\/(login|close|status|sync|sync-pending|sync-products|stop-sync|packing|waybill|purchase-lookup|logistics-company|amount-detail)$/);if(!match)return reply(404,{error:'接口不存在'});
+ const match=req.url.match(/^\/accounts\/([a-f0-9]{32}|[1-9][0-9]*)\/(login|close|status|sync|sync-pending|sync-products|stop-sync|packing|waybill|purchase-lookup|logistics-company|amount-detail|tracking|first-mile-start)$/);if(!match)return reply(404,{error:'接口不存在'});
  const [,id,action]=match;
  if(id!==accountKey)return reply(404,{error:'账户不属于当前容器'});
  try{if(action==='status'&&req.method==='GET'){let s=sessions.get(id);if(!s){s={state:'closed',sync:await readJob(root,id)};sessions.set(id,s)}return reply(200,view(s))}
  if(sessions.get(id)?.packing&&action!=='status')return reply(409,{error:'正在提交代打包，请等待结果'});
+ if(action==='first-mile-start'&&req.method==='POST'){
+  const session=sessions.get(id);
+  if(!session?.context||session.state!=='verified')return reply(409,{error:'请先登录妙手并打开订单处理页'});
+  if(!session.firstMile)return reply(409,{error:'请先在账户容器启用妙手采购插件'});
+  const result=await session.firstMile.runNow();
+  return reply(result.error?409:202,result);
+ }
+ if(action==='tracking'&&req.method==='POST'){
+  const session=sessions.get(id);
+  if(!session?.context||session.state!=='verified')return reply(409,{error:'请先在账户管理登录妙手并打开订单页面'});
+  let body='';for await(const chunk of req)body+=chunk;
+  return reply(200,await getTracking({session,payload:JSON.parse(body)}));
+ }
  if(action==='logistics-company'&&req.method==='POST'){
   const session=sessions.get(id);
   if(!session?.context)return reply(409,{error:'请先在账户管理打开并登录妙手浏览器'});
@@ -84,7 +106,7 @@ const server=http.createServer(async(req,res)=>{
  if((action==='sync'||action==='sync-pending'||action==='sync-products')&&req.method==='POST'){const s=sessions.get(id);if(!s?.context||s.state!=='verified')return reply(409,{error:'请先在账户管理打开浏览器并完成订单读取验证'});if(s.sync?.state==='running'&&s.sync.scope!==(action==='sync-products'?'products':action==='sync-pending'?'pending':'all'))return reply(409,{error:'当前账户已有同步任务，请等待完成或先停止'});if(s.sync?.state!=='running'){s.sync={scope:action==='sync-products'?'products':action==='sync-pending'?'pending':'all',state:'running',page:0,pages:0,total:0,collected:0,startedAt:new Date().toISOString()};await s.writeJob(s.sync);void runSync(s,action==='sync-products')}return reply(202,view(s))}
  if(action==='stop-sync'&&req.method==='POST'){const s=sessions.get(id);if(s?.sync?.state==='running')s.sync.cancel=true;return reply(200,view(s))}
  if(action==='login'&&req.method==='POST')return reply(200,await login(id));
- if(action==='close'&&req.method==='POST'){const s=sessions.get(id);if(s?.sync?.state==='running')return reply(409,{error:'请先停止同步任务，再关闭浏览器'});if(s?.context){await Promise.all([...s.pending]);await s.context.close()}return reply(200,view(s))}
+ if(action==='close'&&req.method==='POST'){const s=sessions.get(id);if(s?.sync?.state==='running'||s?.firstMileWriting)return reply(409,{error:'浏览器正在同步，请稍后关闭'});if(s?.context){await Promise.all([...s.pending]);await s.context.close()}return reply(200,view(s))}
  return reply(405,{error:'请求方法不支持'});
  }catch{reply(500,{error:'浏览器操作失败，请重新打开登录窗口'})}
 });

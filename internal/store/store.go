@@ -62,6 +62,19 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, e
 	}
+	if _, e = db.Exec(`CREATE TABLE IF NOT EXISTS package_purchase_logistics(
+ account_id INTEGER NOT NULL REFERENCES accounts(id),
+ package_id TEXT NOT NULL, captured_at TEXT NOT NULL, purchases TEXT NOT NULL,
+ PRIMARY KEY(account_id,package_id));
+ CREATE TABLE IF NOT EXISTS domestic_tracking(
+ account_id INTEGER NOT NULL REFERENCES accounts(id), number TEXT NOT NULL,
+ status TEXT NOT NULL, event_time TEXT NOT NULL, event_at INTEGER NOT NULL, requested_at INTEGER NOT NULL,
+ PRIMARY KEY(account_id,number));
+ CREATE TABLE IF NOT EXISTS domestic_tracking_rules(
+ account_id INTEGER PRIMARY KEY REFERENCES accounts(id), rules TEXT NOT NULL)`); e != nil {
+		db.Close()
+		return nil, e
+	}
 	if e = migrateSuppliers(db); e != nil {
 		db.Close()
 		return nil, e

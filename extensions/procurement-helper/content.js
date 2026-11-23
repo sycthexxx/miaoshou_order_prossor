@@ -11,7 +11,7 @@
  `;shadow.append(style);
  const make=(tag,cls,text)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el};
  const bubble=make('button','bubble','采购清单'),panel=make('section','panel');bubble.title='拖动移动，点击展开采购清单';bubble.setAttribute('aria-expanded','false');panel.hidden=true;
- const head=make('div','head','待采购商品 · 0.1.15'),close=make('button','plain','收起');head.append(close);
+ const head=make('div','head','待采购商品 · 0.1.22'),close=make('button','plain','收起');head.append(close);
  const body=make('div','body'),footer=make('div','footer'),summary=make('span','','等待核对'),rescan=make('button','','重新核对'),resetAll=make('button','','清除核对');footer.append(summary,rescan,resetAll);panel.append(head,body,footer);shadow.append(bubble,panel);
  let dragged=false,expanded=false;
  function clamp(){const r=host.getBoundingClientRect();host.style.left=Math.max(8,Math.min(r.left,innerWidth-r.width-8))+'px';host.style.top=Math.max(8,Math.min(r.top,innerHeight-r.height-8))+'px';host.style.right='auto'}
@@ -35,6 +35,70 @@
  const requiredQuantity=task.variants.reduce((sum,v)=>sum+v.quantity,0);
  if(task.direct)body.append(make('p','meta',`直接查询 · ${answer.connectURL} · ${task.gifts?'包含':'不含'}赠品`));
  body.append(make('p','title',task.title),make('p','meta',`货源 ${task.offerId} · 账户 #${task.account} · ${new Date(task.createdAt).toLocaleString()}`));
+ if(!task.variants.length){
+  bubble.textContent='货源信息';
+  head.firstChild.textContent='货源信息 · 0.1.22';
+  footer.hidden=true;
+ }
+ const supplierBox=make('div','mapping'),supplierTitle=make('strong','','厂家 / 店铺'),supplierInput=make('input','alias'),supplierStatus=make('p','note','正在读取厂家和客服链接…'),readSupplier=make('button','','重新读取'),saveSupplier=make('button','','回传厂家');
+ supplierInput.placeholder='未识别时可手动填写厂家名称';supplierInput.setAttribute('aria-label','厂家或店铺名称');supplierInput.maxLength=120;
+ const chatInput=make('input','alias');
+ chatInput.type='url';chatInput.maxLength=2048;chatInput.placeholder='粘贴 1688 客服聊天页地址';chatInput.setAttribute('aria-label','1688 客服聊天页地址');
+ chatInput.hidden=true;
+ supplierBox.append(supplierTitle,supplierInput,chatInput,readSupplier,saveSupplier,supplierStatus);body.append(supplierBox);
+ let supplierDone=false,supplierBusy=false,supplierEdited=false,supplierCandidate='',supplierStable=0,supplierAttempts=0;
+ async function reportSupplier(name,reading=OPSupplier.supplierReading(document,task.offerId),tryChat=false){
+  if(supplierBusy||offerId(location.href)!==task.offerId)return;
+  const cleaned=OPSupplier.cleanName(name);if(!cleaned){supplierStatus.textContent='请输入有效的厂家名称';return}
+  const pasted=chatInput.value.trim();
+  let chatUrl=pasted?OPSupplier.chatURL(pasted):reading.automaticName===cleaned?reading.chatUrl:'';
+  if(pasted&&!chatUrl){supplierStatus.textContent='请粘贴含卖家账号的 1688 聊天页地址。';return}
+  supplierBusy=true;saveSupplier.disabled=true;supplierStatus.textContent=`正在回传「${cleaned}」…`;
+  try{
+   if(!chatUrl&&tryChat&&reading.automaticName===cleaned&&reading.chatButton?.isConnected){
+    supplierStatus.textContent='正在打开 1688 客服并读取聊天地址…';
+    // Register the source tab before clicking because 1688 can open the popup synchronously.
+    const ready=await chrome.runtime.sendMessage({type:'PREPARE_CHAT_CAPTURE'}).catch(()=>null);
+    if(ready?.ok&&offerId(location.href)===task.offerId&&reading.chatButton.isConnected){
+     reading.chatButton.click();
+     const captured=await chrome.runtime.sendMessage({type:'WAIT_CHAT_CAPTURE'}).catch(()=>null);
+     chatUrl=captured?.chatUrl||'';
+    }
+   }
+   const reply=await chrome.runtime.sendMessage({type:'REPORT_SUPPLIER',name:cleaned,...(chatUrl?{chatUrl}:{})});
+   if(!reply?.ok)throw Error(reply?.error||'厂家回传失败');
+   const result=reply.result;
+   supplierStatus.textContent=OPSupplier.supplierResultText(result)+(chatUrl?' 客服链接已保存。':' 如商品页「客服」打开了独立聊天页，可复制聊天页地址，粘贴后点击「回传厂家」。');
+   chatInput.hidden=!!chatUrl;
+   supplierDone=true;
+  }catch(e){supplierStatus.textContent=e.message+'；可确认后点击“回传厂家”重试。';supplierEdited=true}
+  finally{supplierBusy=false;saveSupplier.disabled=false}
+ }
+ function readSupplierPage(auto=false){
+  if(offerId(location.href)!==task.offerId||supplierBusy)return;
+  const reading=OPSupplier.supplierReading(document,task.offerId),names=reading.automaticName?[reading.automaticName]:reading.names;
+  if(names.length!==1){supplierStable=0;supplierCandidate='';if(!supplierEdited)supplierStatus.textContent=names.length?'页面有多个厂家候选，请核对后手动填写回传。':'暂未识别到明确厂家名称，可手动填写，或等待页面加载后重新读取。';return}
+  const name=names[0];if(!supplierEdited)supplierInput.value=name;
+  const candidate=JSON.stringify([name,reading.chatUrl]);
+  if(candidate===supplierCandidate)supplierStable++;else{supplierCandidate=candidate;supplierStable=1}
+  if(auto&&!supplierEdited&&reading.automaticName===name){
+   if(reading.chatUrl||reading.chatButton||supplierStable>=3||supplierAttempts>=20)void reportSupplier(name,reading,true);
+   else supplierStatus.textContent='已识别厂家，正在读取客服链接…';
+  }
+  else if(auto&&!supplierEdited&&!reading.automaticName)supplierStatus.textContent='读到页面候选名称，但无法确认属于当前商品，请核对后点击“回传厂家”。';
+  else if(!auto){supplierInput.value=name;supplierStatus.textContent='已读取厂家信息，点击“回传厂家”保存。'}
+ }
+ supplierInput.addEventListener('input',()=>{supplierEdited=true});
+ chatInput.addEventListener('input',()=>{supplierEdited=true});
+ readSupplier.onclick=()=>{supplierEdited=true;readSupplierPage(false)};
+ saveSupplier.onclick=()=>{supplierEdited=true;void reportSupplier(supplierInput.value)};
+ readSupplierPage(true);
+ const supplierTimer=setInterval(()=>{
+  if(supplierDone||supplierEdited||supplierAttempts>=20){clearInterval(supplierTimer);return}
+  if(!document.hidden){supplierAttempts++;readSupplierPage(true)}
+ },2000);
+ window.addEventListener('pagehide',()=>clearInterval(supplierTimer),{once:true});
+ if(!task.variants.length){toggle(true);return}
  body.append(make('p','note','绿色 = 数量核对一致，不代表已下单。切换颜色保留已核对结果，切回自动更新。若在其他位置清空选择，请点“清除核对”。SKU图来自本地订单，点击可放大。'));
  if(Date.now()-(typeof task.createdAt==='number'?task.createdAt:Date.parse(task.createdAt))>86400000)body.append(make('p','notice','这是超过一天的采购快照，请刷新采购汇总并重新打开货源。'));
  const notice=make('p','notice','无法识别时，先展开商品规格，并选中颜色；可以填写对应的 1688 规格，再指定数量框。');body.append(notice);
@@ -57,42 +121,6 @@
  }
  checkSourceButton.onclick=()=>{sourceReported='';void checkSource();setTimeout(()=>void checkSource(),1500)};
  void checkSource();const sourceStatusTimer=setInterval(()=>{if(++sourceAttempts>20||offerId(location.href)!==task.offerId){clearInterval(sourceStatusTimer);return}void checkSource()},1500);
- const supplierBox=make('div','mapping'),supplierTitle=make('strong','','厂家 / 店铺'),supplierInput=make('input','alias'),supplierStatus=make('p','note','正在读取页面厂家名称…'),readSupplier=make('button','','重新读取'),saveSupplier=make('button','','回传厂家');
- supplierInput.placeholder='未识别时可手动填写厂家名称';supplierInput.setAttribute('aria-label','厂家或店铺名称');supplierInput.maxLength=120;
- supplierBox.append(supplierTitle,supplierInput,readSupplier,saveSupplier,supplierStatus);body.append(supplierBox);
- let supplierDone=false,supplierBusy=false,supplierEdited=false,supplierCandidate='',supplierStable=0,supplierAttempts=0;
- async function reportSupplier(name){
-  if(supplierBusy||offerId(location.href)!==task.offerId)return;
-  const cleaned=OPSupplier.cleanName(name);if(!cleaned){supplierStatus.textContent='请输入有效的厂家名称';return}
-  supplierBusy=true;saveSupplier.disabled=true;supplierStatus.textContent=`正在回传「${cleaned}」…`;
-  try{
-   const reply=await chrome.runtime.sendMessage({type:'REPORT_SUPPLIER',name:cleaned});
-   if(!reply?.ok)throw Error(reply?.error||'厂家回传失败');
-   const result=reply.result;
-   supplierStatus.textContent=OPSupplier.supplierResultText(result);
-   supplierDone=true;
-  }catch(e){supplierStatus.textContent=e.message+'；可确认后点击“回传厂家”重试。';supplierEdited=true}
-  finally{supplierBusy=false;saveSupplier.disabled=false}
- }
- function readSupplierPage(auto=false){
-  if(offerId(location.href)!==task.offerId||supplierBusy)return;
-  const reading=OPSupplier.supplierReading(document,task.offerId),names=reading.automaticName?[reading.automaticName]:reading.names;
-  if(names.length!==1){supplierStable=0;supplierCandidate='';if(!supplierEdited)supplierStatus.textContent=names.length?'页面有多个厂家候选，请核对后手动填写回传。':'暂未识别到明确厂家名称，可手动填写，或等待页面加载后重新读取。';return}
-  const name=names[0];if(!supplierEdited)supplierInput.value=name;
-  if(name===supplierCandidate)supplierStable++;else{supplierCandidate=name;supplierStable=1}
-  if(auto&&!supplierEdited&&supplierStable>=2&&reading.automaticName===name)void reportSupplier(name);
-  else if(auto&&!supplierEdited&&!reading.automaticName)supplierStatus.textContent='读到页面候选名称，但无法确认属于当前商品，请核对后点击“回传厂家”。';
-  else if(!auto){supplierInput.value=name;supplierStatus.textContent='已读取页面名称，点击“回传厂家”保存。'}
- }
- supplierInput.addEventListener('input',()=>{supplierEdited=true});
- readSupplier.onclick=()=>{supplierEdited=true;readSupplierPage(false)};
- saveSupplier.onclick=()=>{supplierEdited=true;void reportSupplier(supplierInput.value)};
- readSupplierPage(true);
- const supplierTimer=setInterval(()=>{
-  if(supplierDone||supplierEdited||supplierAttempts>=20){clearInterval(supplierTimer);return}
-  if(!document.hidden){supplierAttempts++;readSupplierPage(true)}
- },2000);
- window.addEventListener('pagehide',()=>clearInterval(supplierTimer),{once:true});
  const rows=new Map(),ledger=new Map(),mappingDrafts=new Set();let picking=null;
  const mappingBox=make('div','mapping'),mappingStatus=make('p','note','正在从工作台读取采购专用映射…'),mappingReload=make('button','','读取服务器映射'),mappingRetry=make('button','','重试保存'),importLegacy=make('button','','导入本机旧映射');
  mappingBox.append(make('strong','','采购专用映射'),mappingStatus,mappingReload,mappingRetry,importLegacy);body.append(mappingBox);

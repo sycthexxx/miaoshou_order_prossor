@@ -2,8 +2,8 @@
  const offerId=url=>{try{const u=new URL(url);return u.protocol==='https:'&&u.hostname==='detail.1688.com'?u.pathname.match(/^\/offer\/(\d+)\.html$/)?.[1]||'':''}catch{return ''}};
  const normalize=s=>String(s??'').normalize('NFKC').toLowerCase().replace(/\s+/g,'').trim();
  const tokens=spec=>[...new Set(String(spec).split(/[,，;；|/]+/).map(normalize).filter(Boolean))];
- function snapshot(p){
-  if(p?.version!==1||!offerId(p.url)||offerId(p.url)!==p.offerId||!Array.isArray(p.variants)||!p.variants.length||p.variants.length>1000)throw Error('采购清单格式无效');
+ function snapshot(p,allowEmpty=false){
+  if(p?.version!==1||!offerId(p.url)||offerId(p.url)!==p.offerId||!Array.isArray(p.variants)||(!allowEmpty&&!p.variants.length)||p.variants.length>1000)throw Error('采购清单格式无效');
   const variants=new Map(),images=new Map();
   for(const v of p.variants){if(typeof v.spec!=='string'||!v.spec.trim()||v.spec.length>300||!Number.isSafeInteger(v.quantity)||v.quantity<=0)throw Error('采购规格或数量无效');variants.set(v.spec,(variants.get(v.spec)||0)+v.quantity);images.set(v.spec,[...new Set([...(images.get(v.spec)||[]),...(Array.isArray(v.images)?v.images:[])])].filter(u=>{try{const url=new URL(u);return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password}catch{return false}}).slice(0,6))}
   if(!Number.isFinite((typeof p.createdAt==='number'?p.createdAt:Date.parse(p.createdAt))))throw Error('缺少采购汇总时间，请刷新工作台');

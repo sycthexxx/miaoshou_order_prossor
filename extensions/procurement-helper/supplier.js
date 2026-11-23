@@ -1,8 +1,8 @@
 (()=>{
  const selectors=[
-  '[data-company-name]','[data-seller-name]','[itemprop="legalName"]',
+  'a[data-trace="SHOP_CREDIT"][href] h1','[data-company-name]','[data-seller-name]','[itemprop="legalName"]',
   '[itemtype*="Organization"] [itemprop="name"]',
-  '.company-name','.company-title','.shop-name','[class*="companyName"]','[class*="company-name"]'
+  '.company-name','.company-title','.shop-name','[class*="shopTitle"]','[class*="shop-title"]','[class*="sellerName"]','[class*="companyName"]','[class*="company-name"]'
  ];
  const sellerScope='[data-current-supplier],[data-role="offer-seller"],[data-role="current-supplier"],.od-pc-offer-company,.od-pc-offer-detail-company';
  const unrelatedScope='footer,[data-role="recommendation"],[class*="recommend"],[class*="Recommend"]';
@@ -42,17 +42,73 @@
   }
   return false;
  }
+ const chatPage='https://air.1688.com/app/ocms-fusion-components-1688/def_cbu_web_im/index.html';
+ function chatURL(raw){
+  try{
+   const url=new URL(raw,'https://detail.1688.com');
+   const nick=url.searchParams.get('touid');
+   if(url.origin!=='https://air.1688.com'||url.username||url.password||
+     url.pathname!=='/app/ocms-fusion-components-1688/def_cbu_web_im/index.html'||
+     !nick?.startsWith('cnalichn')||!nick.slice(8).trim()||url.searchParams.get('siteid')!=='cnalichn')return '';
+   url.search=new URLSearchParams({touid:nick,siteid:'cnalichn',status:'1'});
+   url.hash='';
+   return url.href;
+  }catch{return ''}
+ }
+ function isContactLabel(el){
+  const label=String(el?.getAttribute?.('aria-label')||el?.textContent||'').trim();
+  return ['客服','联系卖家','联系客服'].includes(label);
+ }
+ function contactButton(scope){
+  const controls=scope.querySelectorAll('a,button,[role="button"],span,div');
+  for(const el of controls){
+   if(!isContactLabel(el)||!el.getClientRects?.().length||el.closest?.(unrelatedScope))continue;
+   return el.closest?.('a,button,[role="button"]')||el;
+  }
+  return null;
+ }
  function supplierReading(doc,offerId){
-  const nodes=companyNodes(doc),names=[...new Set(nodes.values())],trusted=new Set(),topLeft=new Set();
+  const nodes=companyNodes(doc),names=[...new Set(nodes.values())],trusted=new Set(),topLeft=new Set(),scopes=new Map();
   for(const [el,name] of nodes){
    // A lone recommendation/footer company is still not the current seller.
    if(el.closest?.(unrelatedScope))continue;
    const owner=el.closest?.('[data-offer-id]');if(owner&&String(owner.getAttribute('data-offer-id'))!==String(offerId))continue;
    if(topLeftSeller(el,doc))topLeft.add(name);
-   const scope=el.closest?.(sellerScope);if(scope&&sellerLink(scope))trusted.add(name);
+   // Current shop headers can render the three actions as buttons without shop links.
+   for(let parent=el.parentElement,depth=0;parent&&depth<5;parent=parent.parentElement,depth++){
+    if(['BODY','HTML','MAIN'].includes(parent.tagName)||parent.closest?.(unrelatedScope))break;
+    if(parent.textContent?.includes('关注')&&parent.textContent?.includes('商品')&&contactButton(parent)){
+     if(!scopes.has(name))scopes.set(name,new Set());
+     scopes.get(name).add(parent);
+     topLeft.add(name);
+     break;
+    }
+   }
+   const scope=el.closest?.(sellerScope);
+   if(scope&&sellerLink(scope)){trusted.add(name);if(!scopes.has(name))scopes.set(name,new Set());scopes.get(name).add(scope)}
+   const header=el.closest?.('header,[class*="shop-header"],[class*="shopHeader"],[class*="company-header"],[class*="companyHeader"],[class*="shop-info"],[class*="shopInfo"]');
+   if(header&&topLeft.has(name)&&sellerLink(header)){if(!scopes.has(name))scopes.set(name,new Set());scopes.get(name).add(header)}
   }
   const preferred=topLeft.size?topLeft:trusted;
-  return {names,automaticName:preferred.size===1?[...preferred][0]:''};
+  const automaticName=preferred.size===1?[...preferred][0]:'';
+  const links=new Set(),chatButtons=new Set();
+  for(const scope of scopes.get(automaticName)||[]){
+   for(const link of scope.querySelectorAll('a[href]')){
+    if(link.closest?.(unrelatedScope))continue;
+    const href=chatURL(link.getAttribute('href'));
+    if(href)links.add(href);
+   }
+   const button=contactButton(scope);
+   if(button)chatButtons.add(button);
+   const href=chatURL(button?.getAttribute('data-chat-url'));
+   if(href)links.add(href);
+   const touid=button?.getAttribute('data-touid');
+   if(touid?.startsWith('cnalichn')){
+    const href=chatURL(chatPage+'?'+new URLSearchParams({touid,siteid:'cnalichn'}));
+    if(href)links.add(href);
+   }
+  }
+  return {names,automaticName,chatUrl:links.size===1?[...links][0]:'',chatButton:chatButtons.size===1?[...chatButtons][0]:null};
  }
  function supplierResultText(result){
   if(!result||!['assigned','updated','retained'].every(key=>Number.isSafeInteger(result[key])&&result[key]>=0)||typeof result.supplierName!=='string'||!result.supplierName.trim())throw Error('后端尚未支持厂家名称更新，请更新并重启工作台后端');
@@ -64,5 +120,5 @@
   if(result.retained)changes.push(`${result.retained} 条同名关联保持不变`);
   return changes.join('；')+'。'+(result.cacheRefreshed===false?' 厂家已保存，汇总刷新失败，请在工作台刷新采购汇总。':'');
  }
- globalThis.OPSupplier={cleanName,supplierNames,supplierReading,supplierResultText};
+ globalThis.OPSupplier={cleanName,supplierNames,supplierReading,supplierResultText,chatURL};
 })();

@@ -1,7 +1,7 @@
 (()=>{
  if(typeof globalThis.__opProcurementBridge?.refresh==='function'){globalThis.__opProcurementBridge.refresh();return}
  function state(ready,error=''){
-  document.documentElement.dataset.opProcurementBridgeReady=ready?'0.1.15':'';
+  document.documentElement.dataset.opProcurementBridgeReady=ready?'0.1.22':'';
   document.documentElement.dataset.opProcurementBridgeError=error;
   window.dispatchEvent(new CustomEvent('op-procurement-bridge-status'));
  }
@@ -17,7 +17,7 @@
   const supplier=message.type==='SAVE_CAPTURED_SUPPLIER',offer=message.type==='GET_PURCHASE_OFFER',read=settings||offer||message.type==='GET_PURCHASE_MAPPING';
   const url=sourceStatus?`/api/accounts/${message.account}/source-status/${message.productId}`:settings?'/api/plugin-query-settings':offer?`/api/accounts/${message.account}/procurement/offers/${message.productId}?gifts=${message.gifts?1:0}`:supplier?`/api/accounts/${message.account}/source-supplier/capture`:`/api/accounts/${message.account}/procurement-mappings/${message.productId}`;
   const options={method:read?'GET':supplier?'POST':'PUT',credentials:'same-origin',signal:AbortSignal.timeout(15000)};
-  if(!read){options.headers={'Content-Type':'application/json'};options.body=JSON.stringify(sourceStatus?{state:message.state,reason:message.reason,source:'plugin',...(message.evidence?{evidence:message.evidence}:{})}:supplier?{productId:message.productId,name:message.name}:{revision:message.revision,mapping:message.mapping})}
+  if(!read){options.headers={'Content-Type':'application/json'};options.body=JSON.stringify(sourceStatus?{state:message.state,reason:message.reason,source:'plugin',...(message.evidence?{evidence:message.evidence}:{})}:supplier?{productId:message.productId,name:message.name,...(message.chatUrl?{chatUrl:message.chatUrl}:{})}:{revision:message.revision,mapping:message.mapping})}
   fetch(url,options).then(async r=>{
     if(r.status===404)throw Error('后端未提供此接口或货源不存在，请更新并重启工作台后端后重试');
     const data=await r.json();reply({ok:r.ok,result:data,status:r.status,...(!r.ok?{error:data.error||'工作台保存失败'}:{})});
